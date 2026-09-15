@@ -1,0 +1,10 @@
+{
+  "dart.previewFlutterUiGuides": true,
+  "search.exclude": {
+    "**/build": true,
+    "**/.dart_tool": true
+  },
+  "deno.enablePaths": [
+    "supabase/functions"
+  ]
+}

@@ -1,0 +1,8 @@
+# Configuracion minima para desplegar las Edge Functions con la CLI de
+# Supabase. El proyecto remoto se indica con --project-ref al desplegar.
+project_id = "landin_onix"
+
+[functions.verificar-telefono]
+# La landing la llama con la anon key; los datos sensibles (credenciales de
+# Twilio y service_role) solo existen dentro de la funcion.
+verify_jwt = true

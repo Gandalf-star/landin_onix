@@ -1,0 +1,38 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Onix · landing en Chrome",
+      "request": "launch",
+      "type": "dart",
+      "program": "lib/main.dart",
+      "cwd": "${workspaceFolder}",
+      "deviceId": "chrome",
+      "flutterMode": "debug",
+      "toolArgs": ["--web-port=5000"]
+    },
+    {
+      "name": "Onix · landing en Edge",
+      "request": "launch",
+      "type": "dart",
+      "program": "lib/main.dart",
+      "cwd": "${workspaceFolder}",
+      "deviceId": "edge",
+      "flutterMode": "debug",
+      "toolArgs": ["--web-port=5000"]
+    },
+    {
+      "name": "Onix · landing con link de invitación",
+      "request": "launch",
+      "type": "dart",
+      "program": "lib/main.dart",
+      "cwd": "${workspaceFolder}",
+      "deviceId": "chrome",
+      "flutterMode": "debug",
+      "toolArgs": [
+        "--web-port=5000",
+        "--web-launch-url=http://localhost:5000/?ref=ONX-7K4Q-2P9M"
+      ]
+    }
+  ]
+}
