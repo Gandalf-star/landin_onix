@@ -212,13 +212,6 @@ class _BotonParticipar extends StatelessWidget {
           decoration: BoxDecoration(
             gradient: GradientesOnix.dorado,
             borderRadius: BorderRadius.circular(999),
-            boxShadow: [
-              BoxShadow(
-                color: ColoresOnix.amarilloOnix.withValues(alpha: 0.32),
-                blurRadius: 18,
-                offset: const Offset(0, 6),
-              ),
-            ],
           ),
           child: Text(
             texto,

@@ -59,7 +59,7 @@ class SeccionHero extends StatelessWidget {
   }
 }
 
-/// Fondo azul Onix con dos halos amarillos difuminados.
+/// Fondo azul Onix con un halo azul difuminado abajo a la izquierda.
 class _FondoHero extends StatelessWidget {
   const _FondoHero();
 
@@ -69,14 +69,6 @@ class _FondoHero extends StatelessWidget {
       decoration: const BoxDecoration(gradient: GradientesOnix.fondoOscuro),
       child: Stack(
         children: [
-          Positioned(
-            top: -180,
-            right: -120,
-            child: _Halo(
-              diametro: 520,
-              color: ColoresOnix.amarilloOnix.withValues(alpha: 0.16),
-            ),
-          ),
           Positioned(
             bottom: -220,
             left: -160,
