@@ -23,7 +23,7 @@ enum EstadoReferido {
 
 /// Un participante de la campana. La identidad es el telefono en E.164,
 /// verificado una sola vez al crear la cuenta; para volver a entrar se usa
-/// [nombreUsuario] y contrasena.
+/// ese mismo telefono con su contrasena.
 @immutable
 class Participante {
   const Participante({
@@ -32,7 +32,6 @@ class Participante {
     required this.telefonoE164,
     required this.creadoEn,
     required this.telefonoVerificado,
-    this.nombreUsuario,
     this.codigoInvitador,
     this.referidosValidos = 0,
     this.referidosPendientes = 0,
@@ -42,11 +41,6 @@ class Participante {
   final String id;
   final String nombre;
   final String telefonoE164;
-
-  /// Nombre de usuario con el que inicia sesion, ya normalizado en
-  /// minusculas. Puede faltar en participantes creados antes de que
-  /// existieran las cuentas.
-  final String? nombreUsuario;
 
   /// Codigo de invitacion de un solo uso que se canjeo al registrarse. Se
   /// fija UNA sola vez y despues es inmutable: ahi vive la garantia de "un
@@ -94,7 +88,6 @@ class Participante {
       id: id,
       nombre: nombre ?? this.nombre,
       telefonoE164: telefonoE164,
-      nombreUsuario: nombreUsuario,
       codigoInvitador: codigoInvitador,
       creadoEn: creadoEn,
       telefonoVerificado: telefonoVerificado ?? this.telefonoVerificado,

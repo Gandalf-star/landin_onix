@@ -87,7 +87,7 @@ class _VitrinaCajas extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             children: [
               for (final (i, estilo)
-                  in [EstiloCaja.azul, EstiloCaja.amarilla, EstiloCaja.azul]
+                  in [EstiloCaja.roja, EstiloCaja.amarilla, EstiloCaja.roja]
                       .indexed) ...[
                 if (i > 0) SizedBox(width: tamano * 0.28),
                 CajaRegalo(tamano: tamano, estilo: estilo),

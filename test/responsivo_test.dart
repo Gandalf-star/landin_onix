@@ -82,7 +82,6 @@ void main() {
         await tester.runAsync(
           () => controlador.registrar(
             nombre: 'Camila Torres',
-            nombreUsuario: 'camila.torres',
             contrasena: 'Clave1234',
             telefono: '964831207',
             pais: PaisTelefono.chile,

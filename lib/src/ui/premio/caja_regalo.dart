@@ -6,18 +6,19 @@ import '../../nucleo/tema_onix.dart';
 
 /// Combinacion de colores de una caja.
 enum EstiloCaja {
-  /// Cuerpo azul Onix con cinta amarilla.
-  azul,
+  /// Cuerpo rojo con cinta amarilla. Reemplaza al azul, que se perdia con
+  /// el fondo oscuro del dialogo y de la seccion de premios.
+  roja,
 
-  /// Cuerpo amarillo Onix con cinta azul.
+  /// Cuerpo amarillo Onix con cinta roja.
   amarilla;
 
+  static const _rojoClaro = Color(0xFFF0474B);
+  static const _rojoMedio = Color(0xFFD62828);
+  static const _rojoOscuro = Color(0xFF9E1B1B);
+
   List<Color> get cuerpo => switch (this) {
-        EstiloCaja.azul => const [
-            Color(0xFF14338F),
-            ColoresOnix.azulElectrico,
-            ColoresOnix.azulOnix,
-          ],
+        EstiloCaja.roja => const [_rojoClaro, _rojoMedio, _rojoOscuro],
         EstiloCaja.amarilla => const [
             ColoresOnix.amarilloIntenso,
             ColoresOnix.amarilloOnix,
@@ -26,7 +27,7 @@ enum EstiloCaja {
       };
 
   List<Color> get tapa => switch (this) {
-        EstiloCaja.azul => const [Color(0xFF1D40A8), ColoresOnix.azulElectrico],
+        EstiloCaja.roja => const [Color(0xFFFF5A5F), _rojoMedio],
         EstiloCaja.amarilla => const [
             Color(0xFFFFDB4D),
             ColoresOnix.amarilloIntenso,
@@ -34,18 +35,15 @@ enum EstiloCaja {
       };
 
   List<Color> get cinta => switch (this) {
-        EstiloCaja.azul => const [
+        EstiloCaja.roja => const [
             ColoresOnix.amarilloIntenso,
             ColoresOnix.ambar,
           ],
-        EstiloCaja.amarilla => const [
-            Color(0xFF1D40A8),
-            ColoresOnix.azulOnix,
-          ],
+        EstiloCaja.amarilla => const [_rojoMedio, _rojoOscuro],
       };
 
   Color get borde => switch (this) {
-        EstiloCaja.azul => ColoresOnix.amarilloOnix.withValues(alpha: 0.45),
+        EstiloCaja.roja => ColoresOnix.amarilloOnix.withValues(alpha: 0.45),
         EstiloCaja.amarilla => ColoresOnix.blanco.withValues(alpha: 0.55),
       };
 }

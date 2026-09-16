@@ -76,15 +76,7 @@ void main() {
       nombre,
     );
     await tester.enterText(
-      find.widgetWithText(TextFormField, 'ej: camila.torres'),
-      'camila.torres',
-    );
-    await tester.enterText(
       find.widgetWithText(TextFormField, 'Mínimo 8, con letras y números'),
-      'Clave1234',
-    );
-    await tester.enterText(
-      find.widgetWithText(TextFormField, 'La misma contraseña'),
       'Clave1234',
     );
   }
@@ -193,13 +185,13 @@ void main() {
     expect(find.textContaining('Modo demostración'), findsOneWidget);
   });
 
-  testWidgets('con las contraseñas distintas no avanza', (tester) async {
+  testWidgets('con una contraseña débil no avanza', (tester) async {
     await montarFormulario(tester);
 
     await llenarCuenta(tester);
     await tester.enterText(
-      find.widgetWithText(TextFormField, 'La misma contraseña'),
-      'OtraClave1',
+      find.widgetWithText(TextFormField, 'Mínimo 8, con letras y números'),
+      'corta1',
     );
     await tester.enterText(
       find.widgetWithText(TextFormField, '9 1234 5678'),
@@ -208,11 +200,27 @@ void main() {
     await tocar(tester, find.byType(Checkbox));
     await tocar(tester, find.text('Crear mi cuenta'));
 
-    expect(find.text('Las contraseñas no coinciden'), findsOneWidget);
+    expect(find.text('Usa al menos 8 caracteres'), findsOneWidget);
     expect(find.text('Confirma tu número'), findsNothing);
   });
 
-  testWidgets('el ingreso pide usuario y contraseña, no el celular', (
+  testWidgets('el registro ya no pide usuario ni repetir la contraseña', (
+    tester,
+  ) async {
+    await montarFormulario(tester);
+
+    expect(find.text('Nombre de usuario'), findsNothing);
+    expect(find.text('Repite tu contraseña'), findsNothing);
+    expect(find.text('Tu nombre'), findsOneWidget);
+    expect(find.text('Tu celular'), findsOneWidget);
+    expect(find.text('Contraseña'), findsOneWidget);
+
+    // Deja que termine la carga inicial del repositorio en memoria: si no,
+    // el test acaba con temporizadores pendientes.
+    await tester.pump(const Duration(seconds: 1));
+  });
+
+  testWidgets('el ingreso pide celular y contraseña, no el nombre', (
     tester,
   ) async {
     await montarFormulario(tester);
@@ -220,12 +228,13 @@ void main() {
     await tocar(tester, find.text('Ya tengo cuenta · Ingresar'));
 
     expect(find.text('Ingresa a tu cuenta'), findsOneWidget);
-    expect(find.text('Tu celular'), findsNothing);
+    expect(find.text('Tu celular'), findsOneWidget);
     expect(find.text('Nombre y apellido'), findsNothing);
+    expect(find.text('Nombre de usuario'), findsNothing);
 
     await tester.enterText(
-      find.widgetWithText(TextFormField, 'ej: camila.torres'),
-      'nadie',
+      find.widgetWithText(TextFormField, '9 1234 5678'),
+      '964831207',
     );
     await tester.enterText(
       find.widgetWithText(TextFormField, 'Tu contraseña'),
@@ -233,7 +242,7 @@ void main() {
     );
     await tocar(tester, find.text('Ingresar'));
 
-    expect(find.text('Usuario o contraseña incorrectos.'), findsOneWidget);
+    expect(find.text('Celular o contraseña incorrectos.'), findsOneWidget);
     expect(find.text('Confirma tu número'), findsNothing);
   });
 }

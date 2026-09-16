@@ -1,8 +1,8 @@
 # Reto 50 Onix · Landing de sorteo y referidos
 
 Landing page en **Flutter Web** para la campaña de referidos que promociona
-**Onix Drive** en Chile y Venezuela. La persona crea su cuenta (usuario y
-contraseña) confirmando su celular con un código por SMS y, por cada persona
+**Onix Drive** en Chile y Venezuela. La persona crea su cuenta (nombre,
+celular y contraseña) confirmando su celular con un código por SMS y, por cada persona
 que quiere invitar, genera un código exclusivo de un solo uso para compartir
 por WhatsApp. Cada invitado que se registra con ese código desde **su propio
 celular** (el dispositivo queda anclado al código) suma **un ticket**. Con
@@ -73,8 +73,8 @@ llegar a los 50 tickets y abrir las cajas (y «Reiniciar premio» para repetir).
 
 | Momento | Qué se pide | SMS |
 | --- | --- | --- |
-| **Crear cuenta** | Nombre, usuario, contraseña, celular y código de invitación (opcional) | Sí, una sola vez, con Twilio Verify |
-| **Iniciar sesión** | Usuario y contraseña | No |
+| **Crear cuenta** | Nombre, celular, contraseña y código de invitación (opcional) | Sí, una sola vez, con Twilio Verify |
+| **Iniciar sesión** | Celular y contraseña | No |
 
 El registro es de dos pasos y la cuenta **no existe** hasta que Twilio aprueba
 el código:
@@ -94,7 +94,7 @@ Navegador ──► Edge Function (código) ──► Twilio VerificationCheck
 - Las funciones SQL del registro sólo las puede ejecutar `service_role` (la Edge
   Function): nadie puede crear una cuenta saltándose Twilio con la anon key.
 - La contraseña se guarda cifrada con bcrypt. Tras 5 intentos fallidos el
-  usuario queda bloqueado 15 minutos.
+  número queda bloqueado 15 minutos.
 - Límites contra el abuso de SMS: 45 s entre envíos, 5 SMS por número por hora,
   10 por IP y 6 por dispositivo.
 
@@ -218,7 +218,7 @@ lib/
       controlador_referidos.dart  Estado compartido de la campaña
     utiles/
       telefono.dart               Normalización E.164 (Chile y Venezuela)
-      credenciales.dart           Reglas de usuario y contraseña
+      credenciales.dart           Reglas de la contraseña
       codigo_referido.dart        Generación y validación de códigos
       dispositivo*.dart           Huella y firma del navegador (anclaje)
     ui/

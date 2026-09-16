@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../datos/modelos.dart';
 import '../../nucleo/config_campana.dart';
 import '../../nucleo/tema_onix.dart';
+import '../componentes/logo_onix.dart';
 
 /// Ticket ganador: el premio en la parte dorada y el talon azul con el
 /// codigo de confirmacion que el equipo Onix pide para entregar el premio.
@@ -67,7 +68,8 @@ class TicketPremio extends StatelessWidget {
                   ),
                 ),
                 SizedBox(
-                  width: 270 * escala,
+                  // Ancho suficiente para la etiqueta y el logo en una linea.
+                  width: 300 * escala,
                   child: _ParteRecortada(
                     recorte: _RecorteParte(
                       radioMuesca: radioMuesca,
@@ -336,14 +338,30 @@ class _Talon extends StatelessWidget {
           ),
           SizedBox(height: 16 * escala),
         ],
-        Text(
-          'CÓDIGO DE CONFIRMACIÓN',
-          style: TextStyle(
-            color: ColoresOnix.sobreAzulSuave,
-            fontSize: 10.5 * escala,
-            fontWeight: FontWeight.w800,
-            letterSpacing: 1.4,
-          ),
+        // Etiqueta a la izquierda y logo a la derecha, centrados en la misma
+        // linea. Si el talon es angosto, la etiqueta se achica antes que el
+        // logo para que nada se desborde.
+        Row(
+          children: [
+            Expanded(
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  'CÓDIGO DE CONFIRMACIÓN',
+                  maxLines: 1,
+                  style: TextStyle(
+                    color: ColoresOnix.sobreAzulSuave,
+                    fontSize: 10.5 * escala,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 1.4,
+                  ),
+                ),
+              ),
+            ),
+            SizedBox(width: 12 * escala),
+            LogoOnix(alto: 24 * escala, sobreFondoOscuro: true),
+          ],
         ),
         SizedBox(height: 6 * escala),
         FittedBox(

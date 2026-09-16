@@ -48,9 +48,9 @@ abstract final class ConfigCampana {
     (
       Icons.phone_iphone_rounded,
       'Crea tu cuenta',
-      'Elige tu usuario y contraseña, y confirma tu celular chileno o '
-          'venezolano con el código que te llega por SMS. Un número = una '
-          'persona.',
+      'Escribe tu nombre, elige una contraseña y confirma tu celular '
+          'chileno o venezolano con el código que te llega por SMS. Un '
+          'número = una persona.',
     ),
     (
       Icons.qr_code_2_rounded,
@@ -142,7 +142,7 @@ abstract final class ConfigCampana {
     ),
     (
       '¿Cómo vuelvo a entrar a mi cuenta?',
-      'Con el nombre de usuario y la contraseña que elegiste al registrarte. '
+      'Con tu celular y la contraseña que elegiste al registrarte. '
           'El código por SMS se pide una sola vez, para confirmar que el '
           'celular es tuyo al crear la cuenta.',
     ),

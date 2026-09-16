@@ -256,7 +256,6 @@ as $$
     'participante', jsonb_build_object(
       'id',             p.id,
       'nombre',         p.nombre,
-      'nombre_usuario', p.nombre_usuario,
       'telefono_e164',  p.telefono_e164,
       'tickets',        public.fn_tickets(p.id),
       'ganador_prueba', p.ganador_prueba
@@ -288,7 +287,6 @@ begin
     'participante', jsonb_build_object(
       'id',                   v_persona.id,
       'nombre',               v_persona.nombre,
-      'nombre_usuario',       v_persona.nombre_usuario,
       'telefono_e164',        v_persona.telefono_e164,
       'estado',               v_persona.estado,
       'ganador_prueba',       v_persona.ganador_prueba,
@@ -321,7 +319,6 @@ begin
                                     jsonb_build_object(
                                       'id',             inv.id,
                                       'nombre',         inv.nombre,
-                                      'nombre_usuario', inv.nombre_usuario,
                                       'telefono_e164',  inv.telefono_e164,
                                       'estado',         inv.estado,
                                       'creado_en',      inv.creado_en
@@ -656,7 +653,6 @@ begin
         select t.tickets, p.creado_en, jsonb_build_object(
                  'id',             p.id,
                  'nombre',         p.nombre,
-                 'nombre_usuario', p.nombre_usuario,
                  'telefono_e164',  p.telefono_e164,
                  'estado',         p.estado,
                  'ganador_prueba', p.ganador_prueba,
@@ -672,7 +668,6 @@ begin
                  on rp.participante_id = p.id and rp.estado <> 'reiniciado'
          where v_texto is null
             or lower(p.nombre) like '%' || v_texto || '%'
-            or p.nombre_usuario like '%' || ltrim(v_texto, '@') || '%'
             or (v_digitos is not null and char_length(v_digitos) >= 4
                 and p.telefono_e164 like '%' || v_digitos || '%')
          order by t.tickets desc, p.creado_en desc

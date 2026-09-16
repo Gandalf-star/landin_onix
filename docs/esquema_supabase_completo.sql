@@ -36,7 +36,7 @@
 --     teléfono se confirma UNA vez, al crear la cuenta, con un código que
 --     envía Twilio Verify desde la Edge Function `verificar-telefono`
 --     (ver docs/esquema_supabase_cuentas.sql). Para volver a entrar se usa
---     nombre de usuario y contraseña, sin SMS.
+--     ese mismo celular con su contraseña, sin SMS.
 --  2. El cliente NUNCA escribe directo en las tablas. Todo pasa por
 --     funciones `security definer` que aplican las reglas anti-fraude.
 --  3. Lo que se puede expresar como restricción de base de datos se
@@ -103,6 +103,7 @@ alter table public.participantes
 create or replace function public.fn_campos_inmutables()
 returns trigger
 language plpgsql
+set search_path = public
 as $$
 begin
   if new.telefono_e164 is distinct from old.telefono_e164 then
@@ -151,6 +152,7 @@ create index if not exists idx_referidos_invitador
 create or replace function public.fn_sin_ciclos()
 returns trigger
 language plpgsql
+set search_path = public
 as $$
 declare
   actual uuid := new.invitador_id;
@@ -376,6 +378,7 @@ drop view if exists public.vista_estadisticas;
 create or replace function public.fn_generar_codigo_invitacion()
 returns text
 language plpgsql
+set search_path = public
 as $$
 declare
   alfabeto  text := '23456789ABCDEFGHJKMNPQRSTUVWXYZ';
@@ -531,8 +534,8 @@ grant execute on function public.fn_invitacion_valida(text) to anon, authenticat
 --       `cuenta_completar_registro`, que crea al participante y le abre
 --       una sesión.
 --
---  Ingreso: nombre de usuario + contraseña (`cuenta_iniciar_sesion`). No se
---  envía ningún SMS al iniciar sesión.
+--  Ingreso: celular + contraseña (`cuenta_iniciar_sesion`). No se envía
+--  ningún SMS al iniciar sesión: el teléfono es la identidad de la cuenta.
 --
 --  Seguridad
 --  ---------
@@ -573,22 +576,20 @@ alter table public.participantes drop column if exists token_sesion;
 
 -- ---------------------------------------------------------------------
 -- Credenciales del participante
+--
+-- La identidad de la cuenta es el teléfono en E.164, que ya es único en
+-- `participantes`. El nombre de usuario se retiró del registro: sobraba,
+-- porque el teléfono verificado identifica a la persona igual de bien y
+-- era un campo más que llenar. Aquí se borra si la base lo tenía.
 -- ---------------------------------------------------------------------
-alter table public.participantes
-  add column if not exists nombre_usuario text;
 alter table public.participantes
   add column if not exists hash_contrasena text;
 
-create unique index if not exists idx_participantes_nombre_usuario
-  on public.participantes (nombre_usuario);
-
--- Minusculas, digitos, punto y guion bajo; de 3 a 20 caracteres. Se guarda
--- ya normalizado, asi el indice UNIQUE no distingue mayusculas.
+drop index if exists public.idx_participantes_nombre_usuario;
 alter table public.participantes
   drop constraint if exists nombre_usuario_valido;
 alter table public.participantes
-  add constraint nombre_usuario_valido
-  check (nombre_usuario ~ '^[a-z0-9][a-z0-9_.]{2,19}$');
+  drop column if exists nombre_usuario;
 
 -- ---------------------------------------------------------------------
 -- Sesiones
@@ -614,7 +615,6 @@ create index if not exists idx_sesiones_participante
 create table if not exists public.registros_pendientes (
   id               uuid primary key default gen_random_uuid(),
   nombre           text not null,
-  nombre_usuario   text not null,
   hash_contrasena  text not null,
   telefono_e164    text not null,
   codigo_invitador text,
@@ -641,6 +641,10 @@ alter table public.registros_pendientes
 alter table public.registros_pendientes
   add column if not exists dispositivo jsonb;
 
+-- Por si la tabla ya existía con el nombre de usuario del registro viejo.
+alter table public.registros_pendientes
+  drop column if exists nombre_usuario;
+
 create index if not exists idx_pendientes_telefono
   on public.registros_pendientes (telefono_e164, creado_en desc);
 create index if not exists idx_pendientes_ip
@@ -651,16 +655,21 @@ create index if not exists idx_pendientes_huella
 -- ---------------------------------------------------------------------
 -- Intentos de inicio de sesión (freno a la fuerza bruta)
 -- ---------------------------------------------------------------------
+-- Antes se contaban por nombre de usuario; ahora el ingreso es por
+-- teléfono, así que la tabla vieja se descarta entera (solo guarda un
+-- historial de 15 minutos, no hay nada que conservar).
+drop table if exists public.intentos_ingreso;
+
 create table if not exists public.intentos_ingreso (
-  id             bigserial primary key,
-  nombre_usuario text not null,
-  huella         text,
-  exito          boolean not null default false,
-  creado_en      timestamptz not null default now()
+  id            bigserial primary key,
+  telefono_e164 text not null,
+  huella        text,
+  exito         boolean not null default false,
+  creado_en     timestamptz not null default now()
 );
 
-create index if not exists idx_intentos_ingreso_usuario
-  on public.intentos_ingreso (nombre_usuario, creado_en desc);
+create index if not exists idx_intentos_ingreso_telefono
+  on public.intentos_ingreso (telefono_e164, creado_en desc);
 
 -- Ninguna de estas tablas se lee desde el navegador: solo las funciones
 -- `security definer` de mas abajo las tocan.
@@ -681,6 +690,7 @@ create function public.fn_error_onix(p_motivo text, p_mensaje text)
 returns jsonb
 language sql
 immutable
+set search_path = public
 as $$
   select jsonb_build_object(
     'error', jsonb_build_object('motivo', p_motivo, 'mensaje', p_mensaje)
@@ -697,7 +707,6 @@ as $$
   select jsonb_build_object(
     'id',                  p.id,
     'nombre',              p.nombre,
-    'nombre_usuario',      p.nombre_usuario,
     'telefono_e164',       p.telefono_e164,
     'codigo_invitador',    p.codigo_invitador,
     'telefono_verificado', p.telefono_verificado,
@@ -714,6 +723,7 @@ create or replace function public.fn_invitacion_json(i public.invitaciones)
 returns jsonb
 language sql
 stable
+set search_path = public
 as $$
   select jsonb_build_object(
     'id',              i.id,
@@ -730,6 +740,7 @@ create or replace function public.fn_desafio_json(r public.registros_pendientes)
 returns jsonb
 language sql
 stable
+set search_path = public
 as $$
   select jsonb_build_object(
     'id',            r.id,
@@ -854,7 +865,7 @@ begin
      or exists (select 1 from public.sesiones
                  where participante_id = v_invitador.id and huella = p_huella)
      or exists (select 1 from public.intentos_ingreso
-                 where nombre_usuario = v_invitador.nombre_usuario
+                 where telefono_e164 = v_invitador.telefono_e164
                    and exito and huella = p_huella) then
     return public.fn_error_onix('dispositivoDelInvitador',
       'Este código no se puede usar desde el dispositivo de quien te invitó. Regístrate desde tu propio celular.');
@@ -871,12 +882,13 @@ $$;
 -- ---------------------------------------------------------------------
 -- Paso 1 · Validar y dejar el registro a la espera del SMS
 -- ---------------------------------------------------------------------
--- La version anterior no recibia el detalle del dispositivo.
+-- Versiones anteriores recibian el nombre de usuario (ya retirado del
+-- registro) y no traian el detalle del dispositivo.
 drop function if exists public.cuenta_preparar_registro(text, text, text, text, text, text, text);
+drop function if exists public.cuenta_preparar_registro(text, text, text, text, text, text, text, jsonb);
 
 create or replace function public.cuenta_preparar_registro(
   p_nombre           text,
-  p_nombre_usuario   text,
   p_contrasena       text,
   p_telefono         text,
   p_codigo_invitador text default null,
@@ -891,7 +903,6 @@ set search_path = public, extensions
 as $$
 declare
   v_nombre    text := trim(coalesce(p_nombre, ''));
-  v_usuario   text := ltrim(lower(trim(coalesce(p_nombre_usuario, ''))), '@');
   v_telefono  text := trim(coalesce(p_telefono, ''));
   v_codigo    text := nullif(upper(trim(coalesce(p_codigo_invitador, ''))), '');
   v_huella    text := left(nullif(trim(coalesce(p_huella, '')), ''), 120);
@@ -917,11 +928,6 @@ begin
     return public.fn_error_onix('desconocido', 'Escribe tu nombre completo.');
   end if;
 
-  if v_usuario !~ '^[a-z0-9][a-z0-9_.]{2,19}$' then
-    return public.fn_error_onix('usuarioInvalido',
-      'El nombre de usuario debe tener entre 3 y 20 caracteres: letras sin tilde, números, punto o guion bajo.');
-  end if;
-
   if p_contrasena is null
      or char_length(p_contrasena) < 8
      or octet_length(p_contrasena) > 72
@@ -941,12 +947,7 @@ begin
   -- Un teléfono, una participación.
   if exists (select 1 from public.participantes where telefono_e164 = v_telefono) then
     return public.fn_error_onix('telefonoYaRegistrado',
-      'Este número ya tiene una cuenta. Ingresa con tu usuario y contraseña.');
-  end if;
-
-  if exists (select 1 from public.participantes where nombre_usuario = v_usuario) then
-    return public.fn_error_onix('usuarioYaRegistrado',
-      'Ese nombre de usuario ya está en uso. Prueba con otro.');
+      'Este número ya tiene una cuenta. Ingresa con tu celular y contraseña.');
   end if;
 
   -- Límite de cuentas por dispositivo en 24 horas.
@@ -1017,10 +1018,10 @@ begin
   end if;
 
   insert into public.registros_pendientes (
-    nombre, nombre_usuario, hash_contrasena, telefono_e164,
+    nombre, hash_contrasena, telefono_e164,
     codigo_invitador, huella, ip, firma, dispositivo
   ) values (
-    v_nombre, v_usuario, crypt(p_contrasena, gen_salt('bf', 10)), v_telefono,
+    v_nombre, crypt(p_contrasena, gen_salt('bf', 10)), v_telefono,
     v_codigo, v_huella, v_ip, v_dispositivo->>'firma', v_dispositivo
   )
   returning * into v_pendiente;
@@ -1183,18 +1184,11 @@ begin
   end if;
 
   -- Se vuelve a comprobar todo: entre el paso 1 y el paso 2 pudo
-  -- registrarse el mismo número o el mismo usuario, o pudo canjearse o
-  -- vencer la invitación.
+  -- registrarse el mismo número, o pudo canjearse o vencer la invitación.
   if exists (select 1 from public.participantes
               where telefono_e164 = v_pendiente.telefono_e164) then
     return public.fn_error_onix('telefonoYaRegistrado',
-      'Este número ya tiene una cuenta. Ingresa con tu usuario y contraseña.');
-  end if;
-
-  if exists (select 1 from public.participantes
-              where nombre_usuario = v_pendiente.nombre_usuario) then
-    return public.fn_error_onix('usuarioYaRegistrado',
-      'Otra persona tomó ese nombre de usuario mientras verificabas. Vuelve atrás y elige otro.');
+      'Este número ya tiene una cuenta. Ingresa con tu celular y contraseña.');
   end if;
 
   if v_pendiente.codigo_invitador is not null then
@@ -1216,11 +1210,11 @@ begin
   -- único salta y se deshacen las dos cosas juntas.
   begin
     insert into public.participantes (
-      nombre, nombre_usuario, hash_contrasena, telefono_e164,
+      nombre, hash_contrasena, telefono_e164,
       codigo_invitador, telefono_verificado, huella_dispositivo, ip_registro,
       firma_dispositivo, dispositivo
     ) values (
-      v_pendiente.nombre, v_pendiente.nombre_usuario,
+      v_pendiente.nombre,
       v_pendiente.hash_contrasena, v_pendiente.telefono_e164,
       v_invitacion.codigo, true, v_pendiente.huella, v_pendiente.ip,
       v_pendiente.firma, v_pendiente.dispositivo
@@ -1244,7 +1238,7 @@ begin
         'Este dispositivo ya se usó para aceptar una invitación. Cada invitado debe registrarse desde su propio celular.');
     end if;
     return public.fn_error_onix('telefonoYaRegistrado',
-      'Ese número o ese nombre de usuario acaban de registrarse. Vuelve a intentarlo.');
+      'Ese número acaba de registrarse. Vuelve a intentarlo.');
   end;
 
   if v_invitacion.id is not null then
@@ -1284,12 +1278,17 @@ $$;
 -- =====================================================================
 
 -- ---------------------------------------------------------------------
--- Iniciar sesión con usuario y contraseña (sin SMS)
+-- Iniciar sesión con el celular y la contraseña (sin SMS)
 -- ---------------------------------------------------------------------
+-- La versión anterior recibía el nombre de usuario en el primer parámetro;
+-- como la firma (text, text, text) no cambia, hay que borrarla antes de
+-- volver a crearla con el nuevo nombre de parámetro.
+drop function if exists public.cuenta_iniciar_sesion(text, text, text);
+
 create or replace function public.cuenta_iniciar_sesion(
-  p_nombre_usuario text,
-  p_contrasena     text,
-  p_huella         text default null
+  p_telefono   text,
+  p_contrasena text,
+  p_huella     text default null
 )
 returns jsonb
 language plpgsql
@@ -1297,22 +1296,22 @@ security definer
 set search_path = public, extensions
 as $$
 declare
-  v_usuario  text := ltrim(lower(trim(coalesce(p_nombre_usuario, ''))), '@');
+  v_telefono text := trim(coalesce(p_telefono, ''));
   v_huella   text := nullif(trim(coalesce(p_huella, '')), '');
   v_persona  public.participantes;
   v_fallos   int;
   v_correcta boolean;
   v_token    uuid;
-  c_max_fallos constant int := 5;   -- por usuario, cada 15 minutos
+  c_max_fallos constant int := 5;   -- por número, cada 15 minutos
 begin
-  if v_usuario = '' or coalesce(p_contrasena, '') = '' then
+  if v_telefono = '' or coalesce(p_contrasena, '') = '' then
     return public.fn_error_onix('credencialesIncorrectas',
-      'Escribe tu usuario y tu contraseña.');
+      'Escribe tu celular y tu contraseña.');
   end if;
 
   select count(*) into v_fallos
     from public.intentos_ingreso
-   where nombre_usuario = v_usuario
+   where telefono_e164 = v_telefono
      and exito = false
      and creado_en > now() - interval '15 minutes';
 
@@ -1323,20 +1322,20 @@ begin
 
   select * into v_persona
     from public.participantes
-   where nombre_usuario = v_usuario;
+   where telefono_e164 = v_telefono;
 
-  -- Si el usuario no existe igual se calcula un bcrypt, para que el tiempo
-  -- de respuesta no delate qué usuarios existen.
+  -- Si la cuenta no existe igual se calcula un bcrypt, para que el tiempo
+  -- de respuesta no delate qué números están registrados.
   v_correcta := crypt(
     p_contrasena,
     coalesce(v_persona.hash_contrasena, gen_salt('bf', 10))
   ) = v_persona.hash_contrasena;
 
   if v_persona.id is null or v_correcta is not true then
-    insert into public.intentos_ingreso (nombre_usuario, huella, exito)
-    values (v_usuario, v_huella, false);
+    insert into public.intentos_ingreso (telefono_e164, huella, exito)
+    values (v_telefono, v_huella, false);
     return public.fn_error_onix('credencialesIncorrectas',
-      'Usuario o contraseña incorrectos.');
+      'Celular o contraseña incorrectos.');
   end if;
 
   if v_persona.estado <> 'activo' then
@@ -1344,8 +1343,8 @@ begin
       'Esta cuenta no está habilitada para participar.');
   end if;
 
-  insert into public.intentos_ingreso (nombre_usuario, huella, exito)
-  values (v_usuario, v_huella, true);
+  insert into public.intentos_ingreso (telefono_e164, huella, exito)
+  values (v_telefono, v_huella, true);
 
   -- Aprovecha para limpiar las sesiones vencidas de esta persona.
   delete from public.sesiones
@@ -1482,7 +1481,7 @@ $$;
 -- ---------------------------------------------------------------------
 revoke execute on function public.fn_participante_de_sesion(uuid)          from public, anon, authenticated;
 revoke execute on function public.fn_revisar_invitacion(text, text, text)  from public, anon, authenticated;
-revoke execute on function public.cuenta_preparar_registro(text, text, text, text, text, text, text, jsonb) from public, anon, authenticated;
+revoke execute on function public.cuenta_preparar_registro(text, text, text, text, text, text, jsonb) from public, anon, authenticated;
 revoke execute on function public.cuenta_anular_envio(uuid)                from public, anon, authenticated;
 revoke execute on function public.cuenta_preparar_reenvio(uuid)            from public, anon, authenticated;
 revoke execute on function public.cuenta_registro_para_verificar(uuid)     from public, anon, authenticated;
@@ -1490,7 +1489,7 @@ revoke execute on function public.cuenta_registrar_fallo(uuid)             from 
 revoke execute on function public.cuenta_completar_registro(uuid)          from public, anon, authenticated;
 
 -- Registro: sólo la Edge Function `verificar-telefono`.
-grant execute on function public.cuenta_preparar_registro(text, text, text, text, text, text, text, jsonb) to service_role;
+grant execute on function public.cuenta_preparar_registro(text, text, text, text, text, text, jsonb) to service_role;
 grant execute on function public.cuenta_anular_envio(uuid)                 to service_role;
 grant execute on function public.cuenta_preparar_reenvio(uuid)             to service_role;
 grant execute on function public.cuenta_registro_para_verificar(uuid)      to service_role;
@@ -2305,7 +2304,6 @@ as $$
     'participante', jsonb_build_object(
       'id',             p.id,
       'nombre',         p.nombre,
-      'nombre_usuario', p.nombre_usuario,
       'telefono_e164',  p.telefono_e164,
       'tickets',        public.fn_tickets(p.id),
       'ganador_prueba', p.ganador_prueba
@@ -2337,7 +2335,6 @@ begin
     'participante', jsonb_build_object(
       'id',                   v_persona.id,
       'nombre',               v_persona.nombre,
-      'nombre_usuario',       v_persona.nombre_usuario,
       'telefono_e164',        v_persona.telefono_e164,
       'estado',               v_persona.estado,
       'ganador_prueba',       v_persona.ganador_prueba,
@@ -2370,7 +2367,6 @@ begin
                                     jsonb_build_object(
                                       'id',             inv.id,
                                       'nombre',         inv.nombre,
-                                      'nombre_usuario', inv.nombre_usuario,
                                       'telefono_e164',  inv.telefono_e164,
                                       'estado',         inv.estado,
                                       'creado_en',      inv.creado_en
@@ -2705,7 +2701,6 @@ begin
         select t.tickets, p.creado_en, jsonb_build_object(
                  'id',             p.id,
                  'nombre',         p.nombre,
-                 'nombre_usuario', p.nombre_usuario,
                  'telefono_e164',  p.telefono_e164,
                  'estado',         p.estado,
                  'ganador_prueba', p.ganador_prueba,
@@ -2721,7 +2716,6 @@ begin
                  on rp.participante_id = p.id and rp.estado <> 'reiniciado'
          where v_texto is null
             or lower(p.nombre) like '%' || v_texto || '%'
-            or p.nombre_usuario like '%' || ltrim(v_texto, '@') || '%'
             or (v_digitos is not null and char_length(v_digitos) >= 4
                 and p.telefono_e164 like '%' || v_digitos || '%')
          order by t.tickets desc, p.creado_en desc

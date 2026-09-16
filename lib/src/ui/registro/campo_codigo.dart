@@ -29,14 +29,38 @@ class CampoCodigoVerificacion extends StatefulWidget {
 class _CampoCodigoVerificacionState extends State<CampoCodigoVerificacion> {
   final _foco = FocusNode();
 
+  /// Ultimo texto visto: el controlador tambien avisa cuando solo cambia la
+  /// seleccion, y eso no debe volver a disparar la verificacion.
+  String _textoAnterior = '';
+
   @override
   void initState() {
     super.initState();
+    _textoAnterior = widget.controlador.text;
     widget.controlador.addListener(_alCambiar);
     _foco.addListener(_alCambiarFoco);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted && widget.habilitado) _foco.requestFocus();
     });
+  }
+
+  @override
+  void didUpdateWidget(CampoCodigoVerificacion anterior) {
+    super.didUpdateWidget(anterior);
+    if (anterior.controlador != widget.controlador) {
+      anterior.controlador.removeListener(_alCambiar);
+      widget.controlador.addListener(_alCambiar);
+      _textoAnterior = widget.controlador.text;
+    }
+    // Termino la verificacion (por ejemplo, con un codigo incorrecto):
+    // el foco vuelve al campo para poder corregir sin tocar nada.
+    if (!anterior.habilitado && widget.habilitado) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        _foco.requestFocus();
+        _cursorAlFinal();
+      });
+    }
   }
 
   @override
@@ -48,14 +72,39 @@ class _CampoCodigoVerificacionState extends State<CampoCodigoVerificacion> {
   }
 
   void _alCambiarFoco() {
-    if (mounted) setState(() {});
+    if (!mounted) return;
+    if (_foco.hasFocus) _cursorAlFinal();
+    setState(() {});
+  }
+
+  /// Las casillas se llenan de izquierda a derecha, asi que el cursor del
+  /// campo oculto siempre debe quedar al final. Si queda al inicio (pasa al
+  /// recuperar el foco), el retroceso no borra nada y el limite de largo
+  /// impide escribir: el codigo quedaria imposible de corregir.
+  void _cursorAlFinal() {
+    final controlador = widget.controlador;
+    final fin = controlador.text.length;
+    final seleccion = controlador.selection;
+    if (seleccion.isCollapsed && seleccion.baseOffset == fin) return;
+    controlador.selection = TextSelection.collapsed(offset: fin);
   }
 
   void _alCambiar() {
+    final texto = widget.controlador.text;
+    final cambioTexto = texto != _textoAnterior;
+    _textoAnterior = texto;
+    _cursorAlFinal();
+    if (!cambioTexto) return;
     setState(() {});
-    if (widget.controlador.text.length == widget.largo) {
-      widget.alCompletar?.call(widget.controlador.text);
+    if (texto.length == widget.largo) {
+      widget.alCompletar?.call(texto);
     }
+  }
+
+  void _enfocar() {
+    if (!widget.habilitado) return;
+    _foco.requestFocus();
+    _cursorAlFinal();
   }
 
   @override
@@ -89,7 +138,12 @@ class _CampoCodigoVerificacionState extends State<CampoCodigoVerificacion> {
             child: TextField(
               controller: widget.controlador,
               focusNode: _foco,
-              enabled: widget.habilitado,
+              // Mientras se verifica el campo queda de solo lectura en vez
+              // de deshabilitado: deshabilitarlo le quita el foco y reinicia
+              // el cursor, y despues no se podia borrar un digito errado.
+              readOnly: !widget.habilitado,
+              showCursor: false,
+              enableInteractiveSelection: false,
               keyboardType: TextInputType.number,
               autofillHints: const [AutofillHints.oneTimeCode],
               inputFormatters: [
@@ -101,7 +155,7 @@ class _CampoCodigoVerificacionState extends State<CampoCodigoVerificacion> {
         ),
         Positioned.fill(
           child: GestureDetector(
-            onTap: () => _foco.requestFocus(),
+            onTap: _enfocar,
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [

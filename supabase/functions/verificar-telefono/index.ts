@@ -3,7 +3,7 @@
 //
 //  Confirma con Twilio Verify que el teléfono con el que alguien crea su
 //  cuenta existe y es suyo. Solo se usa al REGISTRARSE: para iniciar
-//  sesión la landing usa nombre de usuario y contraseña, sin SMS.
+//  sesión la landing usa el celular y la contraseña, sin SMS.
 //
 //  Acciones (POST con JSON `{ "accion": ... }`):
 //    - iniciar_registro  valida los datos (incluido el anclaje del
@@ -273,7 +273,6 @@ async function iniciarRegistro(datos: Json, peticion: Request) {
 
   const pendiente = await rpc("cuenta_preparar_registro", {
     p_nombre: texto(datos.nombre),
-    p_nombre_usuario: texto(datos.nombre_usuario),
     p_contrasena: texto(datos.contrasena),
     p_telefono: texto(datos.telefono),
     p_codigo_invitador: texto(datos.codigo_invitador),

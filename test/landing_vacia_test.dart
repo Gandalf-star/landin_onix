@@ -48,7 +48,6 @@ class _RepositorioVacio implements RepositorioReferidos {
   @override
   Future<DesafioVerificacion> iniciarRegistro({
     required String nombre,
-    required String nombreUsuario,
     required String contrasena,
     required String telefono,
     required PaisTelefono pais,
@@ -57,7 +56,8 @@ class _RepositorioVacio implements RepositorioReferidos {
 
   @override
   Future<Participante> iniciarSesion({
-    required String nombreUsuario,
+    required String telefono,
+    required PaisTelefono pais,
     required String contrasena,
   }) async => throw UnimplementedError();
 

@@ -72,7 +72,7 @@ class EscenaCajas extends StatefulWidget {
 class _EscenaCajasState extends State<EscenaCajas>
     with TickerProviderStateMixin {
   /// Simetricas: azul a los lados, amarilla al centro.
-  static const _estilos = [EstiloCaja.azul, EstiloCaja.amarilla, EstiloCaja.azul];
+  static const _estilos = [EstiloCaja.roja, EstiloCaja.amarilla, EstiloCaja.roja];
 
   /// Las tapas de los lados salen hacia afuera y la del centro hacia arriba.
   static const _inclinaciones = [-1.0, 0.0, 1.0];

@@ -21,7 +21,7 @@ import 'repositorio_referidos.dart';
 /// aprueba el codigo. Las credenciales de Twilio viven como secretos de esa
 /// funcion: el navegador nunca las ve.
 ///
-/// Ingreso: usuario y contrasena
+/// Ingreso: celular y contrasena
 /// -----------------------------
 /// Quien ya tiene cuenta entra con `cuenta_iniciar_sesion`, sin SMS. La base
 /// compara la contrasena con bcrypt y limita los intentos fallidos.
@@ -159,7 +159,6 @@ class RepositorioSupabase implements RepositorioReferidos {
   @override
   Future<DesafioVerificacion> iniciarRegistro({
     required String nombre,
-    required String nombreUsuario,
     required String contrasena,
     required String telefono,
     required PaisTelefono pais,
@@ -175,7 +174,6 @@ class RepositorioSupabase implements RepositorioReferidos {
       final json = await _llamarVerificacion({
         'accion': 'iniciar_registro',
         'nombre': nombre.trim(),
-        'nombre_usuario': _usuarioValidado(nombreUsuario),
         'contrasena': _contrasenaValidada(contrasena),
         'telefono': _telefonoValidado(telefono, pais),
         'codigo_invitador': _codigoValidado(codigoInvitador),
@@ -188,21 +186,22 @@ class RepositorioSupabase implements RepositorioReferidos {
 
   @override
   Future<Participante> iniciarSesion({
-    required String nombreUsuario,
+    required String telefono,
+    required PaisTelefono pais,
     required String contrasena,
   }) {
     return _proteger(() async {
-      final usuario = UtilesCredenciales.normalizarUsuario(nombreUsuario);
-      if (usuario.isEmpty || contrasena.isEmpty) {
+      final e164 = UtilesTelefono.aE164(telefono, pais);
+      if (e164 == null || contrasena.isEmpty) {
         throw const ErrorReferidos(
           MotivoError.credencialesIncorrectas,
-          'Escribe tu usuario y tu contraseña.',
+          'Escribe tu celular y tu contraseña.',
         );
       }
       final json = _sinError(await cliente.rpc<dynamic>(
         'cuenta_iniciar_sesion',
         params: {
-          'p_nombre_usuario': usuario,
+          'p_telefono': e164,
           'p_contrasena': contrasena,
           'p_huella': await _huellaDispositivo(),
         },
@@ -408,17 +407,6 @@ class RepositorioSupabase implements RepositorioReferidos {
     return e164;
   }
 
-  String _usuarioValidado(String nombreUsuario) {
-    final error = UtilesCredenciales.errorUsuario(nombreUsuario);
-    if (error != null) {
-      throw ErrorReferidos(
-        MotivoError.usuarioInvalido,
-        'Nombre de usuario no válido: ${error.toLowerCase()}.',
-      );
-    }
-    return UtilesCredenciales.normalizarUsuario(nombreUsuario);
-  }
-
   String _contrasenaValidada(String contrasena) {
     final error = UtilesCredenciales.errorContrasena(contrasena);
     if (error != null) {
@@ -456,7 +444,6 @@ class RepositorioSupabase implements RepositorioReferidos {
     return Participante(
       id: json['id'] as String,
       nombre: json['nombre'] as String,
-      nombreUsuario: json['nombre_usuario'] as String?,
       telefonoE164: json['telefono_e164'] as String,
       codigoInvitador: json['codigo_invitador'] as String?,
       creadoEn: _fecha(json['creado_en']),

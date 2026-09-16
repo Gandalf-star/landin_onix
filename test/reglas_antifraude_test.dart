@@ -12,9 +12,6 @@ const contrasenaPrueba = 'Clave1234';
 
 /// Registra a alguien de punta a punta: pide el codigo y lo confirma.
 ///
-/// Si no se indica [nombreUsuario] se deriva del telefono, asi cada
-/// registro de prueba tiene un usuario distinto sin tener que inventarlo.
-///
 /// Quien llega con un codigo de invitacion se registra, como en la vida
 /// real, desde su propio celular: si no se indica [dispositivo] se usa uno
 /// derivado de su telefono. Sin codigo se usa el dispositivo actual del
@@ -23,7 +20,6 @@ Future<Participante> registrar(
   RepositorioEnMemoria repositorio, {
   required String nombre,
   required String telefono,
-  String? nombreUsuario,
   String contrasena = contrasenaPrueba,
   PaisTelefono pais = PaisTelefono.chile,
   String? invitador,
@@ -36,7 +32,6 @@ Future<Participante> registrar(
   try {
     final desafio = await repositorio.iniciarRegistro(
       nombre: nombre,
-      nombreUsuario: nombreUsuario ?? 'u$digitos',
       contrasena: contrasena,
       telefono: telefono,
       pais: pais,
@@ -217,7 +212,6 @@ void main() {
         final motivo = await motivoDelError(
           () => repositorio.iniciarRegistro(
             nombre: 'Luis Pérez',
-            nombreUsuario: 'usuario_nuevo',
             contrasena: contrasenaPrueba,
             telefono: '212 123 4567',
             pais: PaisTelefono.venezuela,
@@ -231,7 +225,6 @@ void main() {
       final motivo = await motivoDelError(
         () => repositorio.iniciarRegistro(
           nombre: 'Luis Pérez',
-          nombreUsuario: 'usuario_nuevo',
           contrasena: contrasenaPrueba,
           telefono: '412 123 456',
           pais: PaisTelefono.venezuela,
@@ -254,7 +247,6 @@ void main() {
       final motivo = await motivoDelError(
         () => repositorio.iniciarRegistro(
           nombre: 'Luis Otra Vez',
-          nombreUsuario: 'usuario_nuevo',
           contrasena: contrasenaPrueba,
           telefono: '412 903 4567',
           pais: PaisTelefono.venezuela,
@@ -283,7 +275,6 @@ void main() {
       final motivo = await motivoDelError(
         () => repositorio.iniciarRegistro(
           nombre: 'Javiera Soto',
-          nombreUsuario: 'usuario_nuevo',
           contrasena: contrasenaPrueba,
           telefono: '9 6483 1209',
           pais: PaisTelefono.chile,
@@ -303,7 +294,6 @@ void main() {
       final motivo = await motivoDelError(
         () => repositorio.iniciarRegistro(
           nombre: 'Camila Otra Vez',
-          nombreUsuario: 'usuario_nuevo',
           contrasena: contrasenaPrueba,
           telefono: '+56 9 6483 1207',
           pais: PaisTelefono.chile,
@@ -331,7 +321,6 @@ void main() {
       final motivoMismoCodigo = await motivoDelError(
         () => repositorio.iniciarRegistro(
           nombre: 'Matías Rivas',
-          nombreUsuario: 'usuario_nuevo',
           contrasena: contrasenaPrueba,
           telefono: '9 6483 1208',
           pais: PaisTelefono.chile,
@@ -350,7 +339,6 @@ void main() {
       final motivoOtroCodigo = await motivoDelError(
         () => repositorio.iniciarRegistro(
           nombre: 'Matías Rivas',
-          nombreUsuario: 'usuario_nuevo',
           contrasena: contrasenaPrueba,
           telefono: '9 6483 1208',
           pais: PaisTelefono.chile,
@@ -377,7 +365,6 @@ void main() {
       try {
         await repositorio.iniciarRegistro(
           nombre: 'Matías Rivas',
-          nombreUsuario: 'usuario_nuevo',
           contrasena: contrasenaPrueba,
           telefono: '9 6483 1208',
           pais: PaisTelefono.chile,
@@ -399,7 +386,6 @@ void main() {
       final motivo = await motivoDelError(
         () => repositorio.iniciarRegistro(
           nombre: 'Camila Torres',
-          nombreUsuario: 'usuario_nuevo',
           contrasena: contrasenaPrueba,
           telefono: '9 6483 1207',
           pais: PaisTelefono.chile,
@@ -414,7 +400,6 @@ void main() {
       final motivo = await motivoDelError(
         () => repositorio.iniciarRegistro(
           nombre: 'Camila Torres',
-          nombreUsuario: 'usuario_nuevo',
           contrasena: contrasenaPrueba,
           telefono: '9 6483 1207',
           pais: PaisTelefono.chile,
@@ -436,7 +421,6 @@ void main() {
       final motivo = await motivoDelError(
         () => repositorio.iniciarRegistro(
           nombre: 'Camila Torres',
-          nombreUsuario: 'usuario_nuevo',
           contrasena: contrasenaPrueba,
           telefono: '9 6483 1207',
           pais: PaisTelefono.chile,
@@ -454,7 +438,6 @@ void main() {
     test('un codigo equivocado no crea al participante', () async {
       final desafio = await repositorio.iniciarRegistro(
         nombre: 'Camila Torres',
-        nombreUsuario: 'usuario_nuevo',
         contrasena: contrasenaPrueba,
         telefono: '9 6483 1207',
         pais: PaisTelefono.chile,
@@ -471,7 +454,8 @@ void main() {
       // La cuenta no llego a crearse: no se puede entrar con ella.
       final motivoIngreso = await motivoDelError(
         () => repositorio.iniciarSesion(
-          nombreUsuario: 'usuario_nuevo',
+          telefono: '9 6483 1207',
+          pais: PaisTelefono.chile,
           contrasena: contrasenaPrueba,
         ),
       );
@@ -481,7 +465,6 @@ void main() {
     test('bloquea tras demasiados intentos fallidos', () async {
       final desafio = await repositorio.iniciarRegistro(
         nombre: 'Camila Torres',
-        nombreUsuario: 'usuario_nuevo',
         contrasena: contrasenaPrueba,
         telefono: '9 6483 1207',
         pais: PaisTelefono.chile,
@@ -509,7 +492,6 @@ void main() {
       final motivo = await motivoDelError(
         () => repositorio.iniciarRegistro(
           nombre: 'Camila Torres',
-          nombreUsuario: 'usuario_nuevo',
           contrasena: contrasenaPrueba,
           telefono: '2 2345 6789',
           pais: PaisTelefono.chile,
@@ -522,7 +504,6 @@ void main() {
       final motivo = await motivoDelError(
         () => repositorio.iniciarRegistro(
           nombre: 'Camila Torres',
-          nombreUsuario: 'usuario_nuevo',
           contrasena: contrasenaPrueba,
           telefono: '999999999',
           pais: PaisTelefono.chile,
@@ -545,7 +526,6 @@ void main() {
       final motivo = await motivoDelError(
         () => repositorio.iniciarRegistro(
           nombre: 'Una más',
-          nombreUsuario: 'usuario_nuevo',
           contrasena: contrasenaPrueba,
           telefono: '9 6483 1299',
           pais: PaisTelefono.chile,
@@ -581,7 +561,6 @@ void main() {
         final motivo = await motivoDelError(
           () => repositorio.iniciarRegistro(
             nombre: 'Javiera Soto',
-            nombreUsuario: 'javiera',
             contrasena: contrasenaPrueba,
             telefono: '9 6483 1209',
             pais: PaisTelefono.chile,
@@ -611,7 +590,6 @@ void main() {
         final motivo = await motivoDelError(
           () => repositorio.iniciarRegistro(
             nombre: 'Número Inventado',
-            nombreUsuario: 'inventado',
             contrasena: contrasenaPrueba,
             telefono: '9 6483 1299',
             pais: PaisTelefono.chile,
@@ -629,20 +607,19 @@ void main() {
           repositorio,
           nombre: 'Camila Torres',
           telefono: '9 6483 1207',
-          nombreUsuario: 'camila',
         );
         final invitacion = await repositorio.generarInvitacion(invitador.id);
 
         repositorio.huellaDispositivo = 'celular_prestado';
         await repositorio.iniciarSesion(
-          nombreUsuario: 'camila',
+          telefono: '9 6483 1207',
+          pais: PaisTelefono.chile,
           contrasena: contrasenaPrueba,
         );
 
         final motivo = await motivoDelError(
           () => repositorio.iniciarRegistro(
             nombre: 'Matías Rivas',
-            nombreUsuario: 'matias',
             contrasena: contrasenaPrueba,
             telefono: '9 6483 1208',
             pais: PaisTelefono.chile,
@@ -667,7 +644,6 @@ void main() {
       repositorio.huellaDispositivo = 'celular_compartido';
       final desafioUno = await repositorio.iniciarRegistro(
         nombre: 'Matías Rivas',
-        nombreUsuario: 'matias',
         contrasena: contrasenaPrueba,
         telefono: '9 6483 1208',
         pais: PaisTelefono.chile,
@@ -675,7 +651,6 @@ void main() {
       );
       final desafioDos = await repositorio.iniciarRegistro(
         nombre: 'Javiera Soto',
-        nombreUsuario: 'javiera',
         contrasena: contrasenaPrueba,
         telefono: '9 6483 1209',
         pais: PaisTelefono.chile,
@@ -820,24 +795,24 @@ void main() {
     );
   });
 
-  group('Cuenta con usuario y contraseña', () {
+  group('Cuenta con celular y contraseña', () {
     test(
-      'tras verificar el teléfono se entra con usuario y contraseña',
+      'tras verificar el teléfono se entra con celular y contraseña',
       () async {
         final registrado = await registrar(
           repositorio,
           nombre: 'Camila Torres',
           telefono: '9 6483 1207',
-          nombreUsuario: '@Camila.Torres',
           contrasena: 'MiClave2026',
         );
-        expect(registrado.nombreUsuario, 'camila.torres');
 
         await repositorio.cerrarSesion();
         expect(await repositorio.sesionActual(), isNull);
 
+        // Da igual cómo se escriba el número: se normaliza a E.164.
         final ingresado = await repositorio.iniciarSesion(
-          nombreUsuario: 'CAMILA.TORRES',
+          telefono: '+56 9 6483 1207',
+          pais: PaisTelefono.chile,
           contrasena: 'MiClave2026',
         );
         expect(ingresado.id, registrado.id);
@@ -850,30 +825,30 @@ void main() {
         repositorio,
         nombre: 'Camila Torres',
         telefono: '9 6483 1207',
-        nombreUsuario: 'camila',
       );
 
       final motivo = await motivoDelError(
         () => repositorio.iniciarSesion(
-          nombreUsuario: 'camila',
+          telefono: '9 6483 1207',
+          pais: PaisTelefono.chile,
           contrasena: 'OtraClave99',
         ),
       );
       expect(motivo, MotivoError.credencialesIncorrectas);
     });
 
-    test('bloquea el usuario tras varios intentos fallidos', () async {
+    test('bloquea el número tras varios intentos fallidos', () async {
       await registrar(
         repositorio,
         nombre: 'Camila Torres',
         telefono: '9 6483 1207',
-        nombreUsuario: 'camila',
       );
 
       for (var i = 0; i < 5; i++) {
         await motivoDelError(
           () => repositorio.iniciarSesion(
-            nombreUsuario: 'camila',
+            telefono: '9 6483 1207',
+            pais: PaisTelefono.chile,
             contrasena: 'Adivinando$i',
           ),
         );
@@ -882,55 +857,52 @@ void main() {
       // Ni siquiera la contraseña correcta entra mientras dure el bloqueo.
       final motivo = await motivoDelError(
         () => repositorio.iniciarSesion(
-          nombreUsuario: 'camila',
+          telefono: '9 6483 1207',
+          pais: PaisTelefono.chile,
           contrasena: contrasenaPrueba,
         ),
       );
       expect(motivo, MotivoError.demasiadosIntentos);
     });
 
-    test('el nombre de usuario no se puede repetir', () async {
+    test('el mismo número no se puede registrar dos veces', () async {
       await registrar(
         repositorio,
         nombre: 'Camila Torres',
         telefono: '9 6483 1207',
-        nombreUsuario: 'camila',
       );
 
       final motivo = await motivoDelError(
         () => repositorio.iniciarRegistro(
           nombre: 'Camila Rojas',
-          nombreUsuario: 'Camila',
           contrasena: contrasenaPrueba,
-          telefono: '9 7777 1234',
+          telefono: '9 6483 1207',
           pais: PaisTelefono.chile,
         ),
       );
-      expect(motivo, MotivoError.usuarioYaRegistrado);
+      expect(motivo, MotivoError.telefonoYaRegistrado);
     });
 
-    test('rechaza contraseñas débiles y usuarios mal formados', () async {
-      final motivoClave = await motivoDelError(
+    test('rechaza contraseñas débiles', () async {
+      final motivoCorta = await motivoDelError(
         () => repositorio.iniciarRegistro(
           nombre: 'Camila Torres',
-          nombreUsuario: 'camila',
           contrasena: 'solotexto',
           telefono: '9 6483 1207',
           pais: PaisTelefono.chile,
         ),
       );
-      expect(motivoClave, MotivoError.contrasenaInvalida);
+      expect(motivoCorta, MotivoError.contrasenaInvalida);
 
-      final motivoUsuario = await motivoDelError(
+      final motivoSinNumeros = await motivoDelError(
         () => repositorio.iniciarRegistro(
           nombre: 'Camila Torres',
-          nombreUsuario: 'camila torres',
-          contrasena: contrasenaPrueba,
+          contrasena: 'Clave',
           telefono: '9 6483 1207',
           pais: PaisTelefono.chile,
         ),
       );
-      expect(motivoUsuario, MotivoError.usuarioInvalido);
+      expect(motivoSinNumeros, MotivoError.contrasenaInvalida);
     });
   });
 }

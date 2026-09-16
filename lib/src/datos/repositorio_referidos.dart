@@ -8,8 +8,6 @@ import 'modelos.dart';
 enum MotivoError {
   telefonoInvalido,
   numeroSospechoso,
-  usuarioInvalido,
-  usuarioYaRegistrado,
   contrasenaInvalida,
   credencialesIncorrectas,
   servicioSmsNoDisponible,
@@ -75,23 +73,23 @@ abstract interface class RepositorioReferidos {
   /// por SMS.
   ///
   /// Aqui se aplican las reglas que no dependen de haber verificado el
-  /// telefono todavia (formato, telefono o usuario ya registrados,
+  /// telefono todavia (formato, telefono ya registrado,
   /// contrasena debil, autorreferido, codigo inexistente, limite por
   /// dispositivo y anclaje: si trae codigo, el dispositivo no puede haber
   /// aceptado otra invitacion ni ser el de quien invita). La cuenta todavia
   /// NO existe al terminar este paso.
   Future<DesafioVerificacion> iniciarRegistro({
     required String nombre,
-    required String nombreUsuario,
     required String contrasena,
     required String telefono,
     required PaisTelefono pais,
     String? codigoInvitador,
   });
 
-  /// Ingreso de alguien que ya tiene cuenta: usuario y contrasena, sin SMS.
+  /// Ingreso de alguien que ya tiene cuenta: celular y contrasena, sin SMS.
   Future<Participante> iniciarSesion({
-    required String nombreUsuario,
+    required String telefono,
+    required PaisTelefono pais,
     required String contrasena,
   });
 

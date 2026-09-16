@@ -26,7 +26,6 @@ class _FilaParticipante {
     required this.telefonoE164,
     required this.creadoEn,
     required this.telefonoVerificado,
-    this.nombreUsuario,
     this.contrasena,
     this.codigoInvitador,
     this.huella,
@@ -35,7 +34,6 @@ class _FilaParticipante {
   final String id;
   String nombre;
   final String telefonoE164;
-  final String? nombreUsuario;
 
   /// En memoria se guarda tal cual: estos datos viven solo en la pestaña del
   /// navegador. En Supabase la contrasena se guarda cifrada con bcrypt.
@@ -106,7 +104,6 @@ class _Desafio {
     required this.codigo,
     required this.expiraEn,
     required this.nombre,
-    required this.nombreUsuario,
     required this.contrasena,
     required this.huella,
     this.codigoInvitador,
@@ -117,7 +114,6 @@ class _Desafio {
   String codigo;
   DateTime expiraEn;
   final String nombre;
-  final String nombreUsuario;
   final String contrasena;
   final String huella;
   final String? codigoInvitador;
@@ -171,9 +167,8 @@ class RepositorioEnMemoria
   final _aleatorioSeguro = Random.secure();
   final _participantes = <String, _FilaParticipante>{};
   final _porTelefono = <String, String>{};
-  final _porUsuario = <String, String>{};
 
-  /// Intentos fallidos de inicio de sesion por nombre de usuario.
+  /// Intentos fallidos de inicio de sesion por telefono en E.164.
   final _fallosIngreso = <String, List<DateTime>>{};
   final _referidos = <_FilaReferido>[];
   final _desafios = <String, _Desafio>{};
@@ -317,7 +312,6 @@ class RepositorioEnMemoria
   @override
   Future<DesafioVerificacion> iniciarRegistro({
     required String nombre,
-    required String nombreUsuario,
     required String contrasena,
     required String telefono,
     required PaisTelefono pais,
@@ -332,15 +326,6 @@ class RepositorioEnMemoria
         'Escribe tu nombre completo para continuar.',
       );
     }
-
-    final errorUsuario = UtilesCredenciales.errorUsuario(nombreUsuario);
-    if (errorUsuario != null) {
-      throw ErrorReferidos(
-        MotivoError.usuarioInvalido,
-        'Nombre de usuario no válido: ${errorUsuario.toLowerCase()}.',
-      );
-    }
-    final usuario = UtilesCredenciales.normalizarUsuario(nombreUsuario);
 
     final errorContrasena = UtilesCredenciales.errorContrasena(contrasena);
     if (errorContrasena != null) {
@@ -379,16 +364,8 @@ class RepositorioEnMemoria
         existente.codigoInvitador != null
             ? 'Este número ya usó un código de invitación. Cada persona puede '
                 'ser invitada una sola vez.'
-            : 'Este número ya tiene una cuenta. Ingresa con tu usuario y '
+            : 'Este número ya tiene una cuenta. Ingresa con tu celular y '
                 'contraseña.',
-      );
-    }
-
-    // El nombre de usuario tambien es unico.
-    if (_porUsuario.containsKey(usuario)) {
-      throw const ErrorReferidos(
-        MotivoError.usuarioYaRegistrado,
-        'Ese nombre de usuario ya está en uso. Prueba con otro.',
       );
     }
 
@@ -443,7 +420,6 @@ class RepositorioEnMemoria
     return _crearDesafio(
       telefonoE164: e164,
       nombre: nombreLimpio,
-      nombreUsuario: usuario,
       contrasena: contrasena,
       huella: huella,
       codigoInvitador: invitacionNormalizada,
@@ -452,22 +428,23 @@ class RepositorioEnMemoria
 
   @override
   Future<Participante> iniciarSesion({
-    required String nombreUsuario,
+    required String telefono,
+    required PaisTelefono pais,
     required String contrasena,
   }) async {
     await _latencia();
 
-    final usuario = UtilesCredenciales.normalizarUsuario(nombreUsuario);
-    if (usuario.isEmpty || contrasena.isEmpty) {
+    final e164 = UtilesTelefono.aE164(telefono, pais);
+    if (e164 == null || contrasena.isEmpty) {
       throw const ErrorReferidos(
         MotivoError.credencialesIncorrectas,
-        'Escribe tu usuario y tu contraseña.',
+        'Escribe tu celular y tu contraseña.',
       );
     }
 
-    // Freno a la fuerza bruta: pocos intentos fallidos por usuario.
+    // Freno a la fuerza bruta: pocos intentos fallidos por numero.
     final limite = DateTime.now().subtract(_ventanaFallosIngreso);
-    final fallos = _fallosIngreso.putIfAbsent(usuario, () => [])
+    final fallos = _fallosIngreso.putIfAbsent(e164, () => [])
       ..removeWhere((fecha) => fecha.isBefore(limite));
     if (fallos.length >= _maxFallosIngreso) {
       throw const ErrorReferidos(
@@ -477,19 +454,19 @@ class RepositorioEnMemoria
       );
     }
 
-    final id = _porUsuario[usuario];
+    final id = _porTelefono[e164];
     final fila = id == null ? null : _participantes[id];
-    // Mismo mensaje si el usuario no existe o si la clave no coincide: asi
-    // no se puede averiguar que usuarios existen.
+    // Mismo mensaje si la cuenta no existe o si la clave no coincide: asi
+    // no se puede averiguar que numeros estan registrados.
     if (fila == null || fila.contrasena != contrasena) {
       fallos.add(DateTime.now());
       throw const ErrorReferidos(
         MotivoError.credencialesIncorrectas,
-        'Usuario o contraseña incorrectos.',
+        'Celular o contraseña incorrectos.',
       );
     }
 
-    _fallosIngreso.remove(usuario);
+    _fallosIngreso.remove(e164);
     fila.huellasIngreso.add(huellaDispositivo);
     await _guardarSesion(fila.id);
     return _aModelo(fila);
@@ -563,20 +540,12 @@ class RepositorioEnMemoria
 
     _desafios.remove(idDesafio);
 
-    // Entre el paso 1 y el paso 2 pudo registrarse el mismo numero o el
-    // mismo nombre de usuario.
+    // Entre el paso 1 y el paso 2 pudo registrarse el mismo numero.
     if (_porTelefono.containsKey(desafio.telefonoE164)) {
       throw const ErrorReferidos(
         MotivoError.telefonoYaRegistrado,
-        'Este número ya tiene una cuenta. Ingresa con tu usuario y '
+        'Este número ya tiene una cuenta. Ingresa con tu celular y '
         'contraseña.',
-      );
-    }
-    if (_porUsuario.containsKey(desafio.nombreUsuario)) {
-      throw const ErrorReferidos(
-        MotivoError.usuarioYaRegistrado,
-        'Otra persona tomó ese nombre de usuario mientras verificabas. '
-        'Vuelve atrás y elige otro.',
       );
     }
 
@@ -598,7 +567,6 @@ class RepositorioEnMemoria
       id: _nuevoId('par'),
       nombre: desafio.nombre,
       telefonoE164: desafio.telefonoE164,
-      nombreUsuario: desafio.nombreUsuario,
       contrasena: desafio.contrasena,
       creadoEn: DateTime.now(),
       telefonoVerificado: true,
@@ -608,7 +576,6 @@ class RepositorioEnMemoria
 
     _participantes[fila.id] = fila;
     _porTelefono[fila.telefonoE164] = fila.id;
-    _porUsuario[desafio.nombreUsuario] = fila.id;
     _registrosPorDispositivo
         .putIfAbsent(desafio.huella, () => [])
         .add(DateTime.now());
@@ -857,7 +824,6 @@ class RepositorioEnMemoria
   DesafioVerificacion _crearDesafio({
     required String telefonoE164,
     required String nombre,
-    required String nombreUsuario,
     required String contrasena,
     required String huella,
     String? codigoInvitador,
@@ -868,7 +834,6 @@ class RepositorioEnMemoria
       codigo: _codigoVerificacion(),
       expiraEn: DateTime.now().add(_duracionDesafio),
       nombre: nombre,
-      nombreUsuario: nombreUsuario,
       contrasena: contrasena,
       huella: huella,
       codigoInvitador: codigoInvitador,
@@ -945,7 +910,6 @@ class RepositorioEnMemoria
   Participante _aModelo(_FilaParticipante fila) => Participante(
         id: fila.id,
         nombre: fila.nombre,
-        nombreUsuario: fila.nombreUsuario,
         telefonoE164: fila.telefonoE164,
         codigoInvitador: fila.codigoInvitador,
         creadoEn: fila.creadoEn,

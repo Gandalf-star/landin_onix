@@ -14,7 +14,7 @@ import 'campo_codigo.dart';
 /// Tarjeta blanca del hero con el flujo completo de participacion.
 ///
 /// - Registro: datos de la cuenta -> codigo por SMS al celular -> panel.
-/// - Ingreso: usuario y contrasena -> panel, sin SMS.
+/// - Ingreso: celular y contrasena -> panel, sin SMS.
 class TarjetaParticipacion extends StatefulWidget {
   const TarjetaParticipacion({super.key});
 
@@ -25,9 +25,7 @@ class TarjetaParticipacion extends StatefulWidget {
 class _TarjetaParticipacionState extends State<TarjetaParticipacion> {
   final _formulario = GlobalKey<FormState>();
   final _nombre = TextEditingController();
-  final _nombreUsuario = TextEditingController();
   final _contrasena = TextEditingController();
-  final _repetirContrasena = TextEditingController();
   final _telefono = TextEditingController();
   final _codigoInvitador = TextEditingController();
   final _codigoVerificacion = TextEditingController();
@@ -55,9 +53,7 @@ class _TarjetaParticipacionState extends State<TarjetaParticipacion> {
   @override
   void dispose() {
     _nombre.dispose();
-    _nombreUsuario.dispose();
     _contrasena.dispose();
-    _repetirContrasena.dispose();
     _telefono.dispose();
     _codigoInvitador.dispose();
     _codigoVerificacion.dispose();
@@ -126,8 +122,8 @@ class _TarjetaParticipacionState extends State<TarjetaParticipacion> {
             const SizedBox(height: 8),
             Text(
               _modoIngreso
-                  ? 'Entra con tu nombre de usuario y tu contraseña para ver '
-                      'tu progreso.'
+                  ? 'Entra con tu celular y tu contraseña para ver tu '
+                      'progreso.'
                   : 'Crea tu cuenta en menos de un minuto. Confirmaremos tu '
                       'celular con un código por SMS.',
               style: Theme.of(context)
@@ -157,25 +153,28 @@ class _TarjetaParticipacionState extends State<TarjetaParticipacion> {
               const SizedBox(height: 16),
             ],
 
-            _Etiqueta('Nombre de usuario'),
+            _Etiqueta('Tu celular'),
             TextFormField(
-              controller: _nombreUsuario,
-              autocorrect: false,
-              enableSuggestions: false,
-              autofillHints: [
-                _modoIngreso
-                    ? AutofillHints.username
-                    : AutofillHints.newUsername,
-              ],
-              decoration: const InputDecoration(
-                hintText: 'ej: camila.torres',
-                prefixIcon: Icon(Icons.alternate_email_rounded, size: 19),
+              key: ValueKey(_pais),
+              controller: _telefono,
+              keyboardType: TextInputType.phone,
+              inputFormatters: [FormateadorTelefono(pais: _pais)],
+              autofillHints: const [AutofillHints.telephoneNumber],
+              decoration: InputDecoration(
+                hintText: _pais.ejemplo,
+                prefixIcon: _SelectorPais(
+                  valor: _pais,
+                  alCambiar: (nuevo) => setState(() {
+                    _pais = nuevo;
+                    _telefono.clear();
+                  }),
+                ),
+                prefixIconConstraints: const BoxConstraints(minWidth: 108),
               ),
-              validator: (valor) => _modoIngreso
-                  ? ((valor ?? '').trim().isEmpty
-                      ? 'Escribe tu nombre de usuario'
-                      : null)
-                  : UtilesCredenciales.errorUsuario(valor ?? ''),
+              validator: (valor) =>
+                  UtilesTelefono.esMovilValido(valor ?? '', _pais)
+                      ? null
+                      : _pais.mensajeFormatoInvalido,
             ),
             const SizedBox(height: 16),
 
@@ -215,44 +214,6 @@ class _TarjetaParticipacionState extends State<TarjetaParticipacion> {
             ),
 
             if (!_modoIngreso) ...[
-              const SizedBox(height: 16),
-              _Etiqueta('Repite tu contraseña'),
-              TextFormField(
-                controller: _repetirContrasena,
-                obscureText: !_verContrasena,
-                autocorrect: false,
-                enableSuggestions: false,
-                decoration:
-                    const InputDecoration(hintText: 'La misma contraseña'),
-                validator: (valor) => valor != _contrasena.text
-                    ? 'Las contraseñas no coinciden'
-                    : null,
-              ),
-              const SizedBox(height: 16),
-
-              _Etiqueta('Tu celular'),
-              TextFormField(
-                key: ValueKey(_pais),
-                controller: _telefono,
-                keyboardType: TextInputType.phone,
-                inputFormatters: [FormateadorTelefono(pais: _pais)],
-                decoration: InputDecoration(
-                  hintText: _pais.ejemplo,
-                  prefixIcon: _SelectorPais(
-                    valor: _pais,
-                    alCambiar: (nuevo) => setState(() {
-                      _pais = nuevo;
-                      _telefono.clear();
-                    }),
-                  ),
-                  prefixIconConstraints: const BoxConstraints(minWidth: 108),
-                ),
-                validator: (valor) =>
-                    UtilesTelefono.esMovilValido(valor ?? '', _pais)
-                        ? null
-                        : _pais.mensajeFormatoInvalido,
-              ),
-
               const SizedBox(height: 16),
               _Etiqueta('Código de invitación (opcional)'),
               TextFormField(
@@ -310,7 +271,6 @@ class _TarjetaParticipacionState extends State<TarjetaParticipacion> {
                   setState(() {
                     _modoIngreso = !_modoIngreso;
                     _contrasena.clear();
-                    _repetirContrasena.clear();
                   });
                 },
                 child: Text(
@@ -336,7 +296,8 @@ class _TarjetaParticipacionState extends State<TarjetaParticipacion> {
 
     if (_modoIngreso) {
       final exito = await controlador.ingresar(
-        nombreUsuario: _nombreUsuario.text,
+        telefono: _telefono.text,
+        pais: _pais,
         contrasena: _contrasena.text,
       );
       if (exito) TextInput.finishAutofillContext();
@@ -354,7 +315,6 @@ class _TarjetaParticipacionState extends State<TarjetaParticipacion> {
 
     await controlador.registrar(
       nombre: _nombre.text,
-      nombreUsuario: _nombreUsuario.text,
       contrasena: _contrasena.text,
       telefono: _telefono.text,
       pais: _pais,

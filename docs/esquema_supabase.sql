@@ -8,7 +8,7 @@
 --     teléfono se confirma UNA vez, al crear la cuenta, con un código que
 --     envía Twilio Verify desde la Edge Function `verificar-telefono`
 --     (ver docs/esquema_supabase_cuentas.sql). Para volver a entrar se usa
---     nombre de usuario y contraseña, sin SMS.
+--     ese mismo celular con su contraseña, sin SMS.
 --  2. El cliente NUNCA escribe directo en las tablas. Todo pasa por
 --     funciones `security definer` que aplican las reglas anti-fraude.
 --  3. Lo que se puede expresar como restricción de base de datos se
@@ -75,6 +75,7 @@ alter table public.participantes
 create or replace function public.fn_campos_inmutables()
 returns trigger
 language plpgsql
+set search_path = public
 as $$
 begin
   if new.telefono_e164 is distinct from old.telefono_e164 then
@@ -123,6 +124,7 @@ create index if not exists idx_referidos_invitador
 create or replace function public.fn_sin_ciclos()
 returns trigger
 language plpgsql
+set search_path = public
 as $$
 declare
   actual uuid := new.invitador_id;
@@ -348,6 +350,7 @@ drop view if exists public.vista_estadisticas;
 create or replace function public.fn_generar_codigo_invitacion()
 returns text
 language plpgsql
+set search_path = public
 as $$
 declare
   alfabeto  text := '23456789ABCDEFGHJKMNPQRSTUVWXYZ';

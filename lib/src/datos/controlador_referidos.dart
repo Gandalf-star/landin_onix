@@ -115,7 +115,6 @@ class ControladorReferidos extends ChangeNotifier {
   /// de verificacion por SMS al telefono.
   Future<bool> registrar({
     required String nombre,
-    required String nombreUsuario,
     required String contrasena,
     required String telefono,
     required PaisTelefono pais,
@@ -124,7 +123,6 @@ class ControladorReferidos extends ChangeNotifier {
     return _ejecutar(() async {
       desafio = await _repositorio.iniciarRegistro(
         nombre: nombre,
-        nombreUsuario: nombreUsuario,
         contrasena: contrasena,
         telefono: telefono,
         pais: pais,
@@ -134,14 +132,16 @@ class ControladorReferidos extends ChangeNotifier {
     });
   }
 
-  /// Ingreso de quien ya tiene cuenta: usuario y contrasena, sin SMS.
+  /// Ingreso de quien ya tiene cuenta: celular y contrasena, sin SMS.
   Future<bool> ingresar({
-    required String nombreUsuario,
+    required String telefono,
+    required PaisTelefono pais,
     required String contrasena,
   }) {
     return _ejecutar(() async {
       participante = await _repositorio.iniciarSesion(
-        nombreUsuario: nombreUsuario,
+        telefono: telefono,
+        pais: pais,
         contrasena: contrasena,
       );
       desafio = null;
