@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:onix_referidos/src/app.dart';
@@ -220,11 +221,23 @@ void main() {
   });
 
   testWidgets('en computador se ve la barra de desplazamiento', (tester) async {
+    // Flutter prueba como si fuera Android: aqui se simula un computador.
+    debugDefaultTargetPlatformOverride = TargetPlatform.windows;
+    addTearDown(() => debugDefaultTargetPlatformOverride = null);
     await montar(tester, const Size(1440, 900));
     await tester.tap(find.text('Premios').last);
     await tester.pumpAndSettle();
 
     final barras = tester.widgetList<Scrollbar>(find.byType(Scrollbar));
     expect(barras.any((barra) => barra.thumbVisibility == true), isTrue);
+    debugDefaultTargetPlatformOverride = null;
+  });
+
+  testWidgets('en celular la barra solo aparece al deslizar', (tester) async {
+    await montar(tester, const Size(390, 844));
+    final barra = tester.widget<Scrollbar>(
+      find.byKey(const Key('barra-desplazamiento')),
+    );
+    expect(barra.thumbVisibility, isFalse);
   });
 }

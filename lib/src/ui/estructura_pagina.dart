@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../app.dart';
@@ -38,6 +39,23 @@ class _EstructuraPaginaState extends State<EstructuraPagina> {
     super.dispose();
   }
 
+  /// En computador la barra queda siempre a la vista, aunque la ventana del
+  /// navegador sea angosta: con mouse es la forma de ver que la pagina
+  /// sigue y de arrastrarla. En celulares y tablets (tambien en su
+  /// navegador) solo aparece mientras se desliza, como es costumbre ahi.
+  bool _conBarraFija() {
+    switch (defaultTargetPlatform) {
+      case TargetPlatform.android:
+      case TargetPlatform.iOS:
+      case TargetPlatform.fuchsia:
+        return false;
+      case TargetPlatform.windows:
+      case TargetPlatform.macOS:
+      case TargetPlatform.linux:
+        return true;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final controlador = ProveedorCampana.de(context);
@@ -45,7 +63,7 @@ class _EstructuraPaginaState extends State<EstructuraPagina> {
       return const _PantallaCarga();
     }
 
-    final esMovil = PuntosQuiebre.esMovil(context);
+    final conBarraFija = _conBarraFija();
 
     return Scaffold(
       backgroundColor: ColoresOnix.azulProfundo,
@@ -53,20 +71,22 @@ class _EstructuraPaginaState extends State<EstructuraPagina> {
       // suelto, y un `Stack` asi se encoge hasta la barra de navegacion
       // (88 px). Sin esto, la pagina queda comprimida en esa franja.
       body: SizedBox.expand(
-        child: Stack(
-          children: [
-            Positioned.fill(
-              // La barra de desplazamiento se dibuja aqui, una sola vez y
-              // siempre visible en computador, para que se note que la
-              // pagina sigue hacia abajo.
-              child: ScrollConfiguration(
-                behavior: ScrollConfiguration.of(
-                  context,
-                ).copyWith(scrollbars: false),
-                child: Scrollbar(
-                  controller: _desplazador,
-                  thumbVisibility: !esMovil,
-                  interactive: true,
+        // La barra de desplazamiento envuelve toda la pantalla para quedar
+        // por encima de la barra de navegacion, que si no le tapa la punta.
+        // Se dibuja una sola vez: la automatica de Flutter se apaga abajo.
+        child: Scrollbar(
+          key: const Key('barra-desplazamiento'),
+          controller: _desplazador,
+          thumbVisibility: conBarraFija,
+          trackVisibility: conBarraFija,
+          interactive: true,
+          child: Stack(
+            children: [
+              Positioned.fill(
+                child: ScrollConfiguration(
+                  behavior: ScrollConfiguration.of(
+                    context,
+                  ).copyWith(scrollbars: false),
                   child: SingleChildScrollView(
                     controller: _desplazador,
                     primary: false,
@@ -79,13 +99,13 @@ class _EstructuraPaginaState extends State<EstructuraPagina> {
                   ),
                 ),
               ),
-            ),
-            BarraNavegacion(
-              desplazador: _desplazador,
-              paginaActual: widget.pagina,
-            ),
-            DistintivoOrigenDatos(arranque: widget.arranque),
-          ],
+              BarraNavegacion(
+                desplazador: _desplazador,
+                paginaActual: widget.pagina,
+              ),
+              DistintivoOrigenDatos(arranque: widget.arranque),
+            ],
+          ),
         ),
       ),
     );

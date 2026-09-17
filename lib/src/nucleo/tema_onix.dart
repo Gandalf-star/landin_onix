@@ -274,6 +274,30 @@ ThemeData construirTemaOnix() {
         side: const BorderSide(color: ColoresOnix.borde),
       ),
     ),
+    // La barra de desplazamiento por defecto es gris oscuro y sobre el azul
+    // de la pagina no se ve: va en amarillo Onix sobre un riel oscuro, que
+    // se distingue tanto en las secciones azules como en las claras.
+    scrollbarTheme: ScrollbarThemeData(
+      thickness: WidgetStateProperty.resolveWith(
+        (estados) => estados.contains(WidgetState.hovered) ||
+                estados.contains(WidgetState.dragged)
+            ? 12
+            : 9,
+      ),
+      radius: const Radius.circular(8),
+      crossAxisMargin: 2,
+      minThumbLength: 48,
+      thumbColor: WidgetStateProperty.resolveWith(
+        (estados) => estados.contains(WidgetState.hovered) ||
+                estados.contains(WidgetState.dragged)
+            ? ColoresOnix.amarilloOnix
+            : ColoresOnix.amarilloOnix.withValues(alpha: 0.8),
+      ),
+      trackColor: WidgetStatePropertyAll(
+        ColoresOnix.azulProfundo.withValues(alpha: 0.55),
+      ),
+      trackBorderColor: const WidgetStatePropertyAll(Colors.transparent),
+    ),
     snackBarTheme: SnackBarThemeData(
       backgroundColor: ColoresOnix.azulOnix,
       contentTextStyle: const TextStyle(
