@@ -25,8 +25,8 @@ class SeccionComoFunciona extends StatelessWidget {
             titulo: 'Cuatro pasos hasta tu caja premiada',
             bajada:
                 'Sin formularios eternos ni papeleo: tu número es tu entrada '
-                'y cada invitado que se registra desde su celular es un '
-                'ticket más.',
+                'y cada invitado que valida su código desde su celular es un '
+                'ticket más, sin crear cuenta.',
           ),
           const SizedBox(height: 54),
           GrillaUniforme(

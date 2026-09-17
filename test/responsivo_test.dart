@@ -4,6 +4,7 @@ import 'package:onix_referidos/src/app.dart';
 import 'package:onix_referidos/src/datos/repositorio_memoria.dart';
 import 'package:onix_referidos/src/nucleo/arranque.dart';
 import 'package:onix_referidos/src/nucleo/entorno.dart';
+import 'package:onix_referidos/src/ui/navegacion.dart';
 import 'package:onix_referidos/src/ui/pagina_landing.dart';
 import 'package:onix_referidos/src/ui/premio/dialogo_cajas.dart';
 import 'package:onix_referidos/src/utiles/telefono.dart';
@@ -52,8 +53,7 @@ void main() {
     );
     await tester.pumpAndSettle();
   }
-
-  /// Estira la vista al alto de toda la pagina, asi se construyen y se
+   ///Estira la vista al alto de toda la pagina, asi se construyen y se
   /// revisan todas las secciones y no solo la primera pantalla.
   Future<void> mostrarPaginaCompleta(WidgetTester tester, Size tamano) async {
     final pagina = find
@@ -68,9 +68,28 @@ void main() {
 
   for (final MapEntry(key: nombre, value: tamano) in tamanos.entries) {
     group('$nombre (${tamano.width.toInt()}x${tamano.height.toInt()})', () {
-      testWidgets('la landing completa no se desborda', (tester) async {
+      for (final pagina in PaginaOnix.values) {
+        testWidgets('la pantalla ${pagina.titulo} no se desborda', (
+          tester,
+        ) async {
+          await montar(tester, tamano);
+          NavegacionOnix.ir(
+            tester.element(find.byType(PaginaLanding)),
+            pagina,
+          );
+          await tester.pumpAndSettle();
+          await mostrarPaginaCompleta(tester, tamano);
+          expect(tester.takeException(), isNull);
+        });
+      }
+
+      testWidgets('el menú de navegación cabe', (tester) async {
         await montar(tester, tamano);
-        await mostrarPaginaCompleta(tester, tamano);
+        final menu = find.byTooltip('Menú');
+        if (menu.evaluate().isEmpty) return;
+        await tester.tap(menu);
+        await tester.pumpAndSettle();
+        expect(find.text('Onix Drive'), findsWidgets);
         expect(tester.takeException(), isNull);
       });
 
@@ -90,6 +109,81 @@ void main() {
         await tester.pumpAndSettle();
 
         expect(find.text('Confirma tu número'), findsOneWidget);
+        expect(tester.takeException(), isNull);
+      });
+
+      testWidgets('el código que entrega el link cabe en la tarjeta', (
+        tester,
+      ) async {
+        late String token;
+        await montar(
+          tester,
+          tamano,
+          preparar: (repositorio) async {
+            repositorio.huellaDispositivo = 'celular_de_camila';
+            final camila = await registrar(
+              repositorio,
+              nombre: 'María Fernanda González Contreras',
+              telefono: '9 6483 1207',
+            );
+            token = (await repositorio.miEnlace(camila.id)).token;
+            await repositorio.cerrarSesion();
+            repositorio.huellaDispositivo = 'celular_de_matias';
+          },
+        );
+
+        final controlador = ProveedorCampana.accion(
+          tester.element(find.byType(PaginaLanding)),
+        );
+        controlador.tokenEnlaceDetectado = token;
+        await tester.runAsync(controlador.reintentarCodigoAsignado);
+
+        // Centrada, para que la barra de navegación fija no la tape.
+        await Scrollable.ensureVisible(
+          tester.element(find.text('Tengo un código')),
+          alignment: 0.5,
+        );
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Tengo un código'));
+        await tester.pumpAndSettle();
+        await mostrarPaginaCompleta(tester, tamano);
+        expect(find.text('Valida tu invitación'), findsOneWidget);
+        expect(find.textContaining('María te invitó'), findsOneWidget);
+        expect(tester.takeException(), isNull);
+
+        await tester.runAsync(
+          () => controlador.validarCodigo(
+            codigoInvitacion: controlador.codigoAsignado!.codigo,
+            telefono: '964831208',
+            pais: PaisTelefono.chile,
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(find.text('¡Invitación validada!'), findsOneWidget);
+        expect(tester.takeException(), isNull);
+      });
+
+      testWidgets('el link y el código individual no se desbordan', (
+        tester,
+      ) async {
+        await montar(
+          tester,
+          tamano,
+          preparar: (repositorio) => registrar(
+            repositorio,
+            nombre: 'Camila Torres',
+            telefono: '9 6483 1207',
+          ),
+        );
+        final controlador = ProveedorCampana.accion(
+          tester.element(find.byType(PaginaLanding)),
+        );
+        await tester.runAsync(controlador.generarInvitacion);
+        await tester.pumpAndSettle();
+        await mostrarPaginaCompleta(tester, tamano);
+
+        expect(find.text('Compartir link por WhatsApp'), findsOneWidget);
+        expect(find.text('CÓDIGO PARA TU PRÓXIMO INVITADO'), findsOneWidget);
         expect(tester.takeException(), isNull);
       });
 

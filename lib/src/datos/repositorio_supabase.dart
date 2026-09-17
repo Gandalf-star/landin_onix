@@ -15,11 +15,18 @@ import 'repositorio_referidos.dart';
 ///
 /// Registro: telefono verificado con Twilio
 /// -----------------------------------------
-/// El registro pasa por la Edge Function `verificar-telefono`
-/// (`supabase/functions/verificar-telefono`). Ella guarda los datos, pide a
-/// Twilio Verify que envie el SMS y solo crea la cuenta cuando Twilio
-/// aprueba el codigo. Las credenciales de Twilio viven como secretos de esa
-/// funcion: el navegador nunca las ve.
+/// Crear una cuenta (solo quien invita) pasa por la Edge Function
+/// `verificar-telefono` (`supabase/functions/verificar-telefono`). Ella
+/// guarda los datos, pide a Twilio Verify que envie el SMS y solo crea la
+/// cuenta cuando Twilio aprueba el codigo. Las credenciales de Twilio viven
+/// como secretos de esa funcion: el navegador nunca las ve.
+///
+/// Invitados: link y codigo, sin cuenta ni SMS
+/// -------------------------------------------
+/// Quien abre un link de invitacion recibe su propio codigo
+/// (`invitado_obtener_codigo`) y lo valida con su celular
+/// (`invitado_validar_codigo`). La base ancla el codigo al telefono y al
+/// dispositivo y aplica las reglas anti-fraude.
 ///
 /// Ingreso: celular y contrasena
 /// -----------------------------
@@ -27,9 +34,10 @@ import 'repositorio_referidos.dart';
 /// compara la contrasena con bcrypt y limita los intentos fallidos.
 ///
 /// Las reglas anti-fraude viven en Postgres y se aplican en el servidor:
-///   - un telefono, una participacion (restriccion UNIQUE);
-///   - el codigo de invitacion se graba una vez y es inmutable (trigger);
-///   - el dispositivo del invitado queda anclado a su codigo (indice unico);
+///   - un telefono, una cuenta (restriccion UNIQUE);
+///   - una invitacion canjeada es inmutable (trigger);
+///   - el dispositivo y el telefono del invitado quedan anclados a su
+///     codigo (indices unicos);
 ///   - sin autorreferidos ni cadenas circulares;
 ///   - limite de registros por dispositivo, de SMS y de intentos.
 ///
@@ -88,34 +96,6 @@ class RepositorioSupabase implements RepositorioReferidos {
     return huella;
   }
 
-  // ---------------------------------------------------------------------
-  // Lecturas publicas
-  //
-  // Salen de una vista ya enmascarada, con permiso de lectura para `anon`: se
-  // ve sin haber iniciado sesion, que es justo lo que necesita la landing.
-  // ---------------------------------------------------------------------
-
-  @override
-  Future<List<FilaRanking>> obtenerRanking({
-    int limite = 10,
-    String? idParticipante,
-  }) {
-    return _proteger(() async {
-      final filas =
-          await cliente.from('vista_ranking').select().limit(limite);
-      return filas.map((fila) {
-        return FilaRanking(
-          posicion: _entero(fila['posicion']),
-          nombreVisible: (fila['nombre_visible'] as String?)?.trim() ?? '',
-          telefonoEnmascarado: fila['telefono_enmascarado'] as String? ?? '',
-          referidosValidos: _entero(fila['referidos_validos']),
-          soyYo: idParticipante != null &&
-              fila['participante_id'] == idParticipante,
-        );
-      }).toList();
-    });
-  }
-
   @override
   Future<Participante?> sesionActual() {
     return _proteger(() async {
@@ -162,7 +142,6 @@ class RepositorioSupabase implements RepositorioReferidos {
     required String contrasena,
     required String telefono,
     required PaisTelefono pais,
-    String? codigoInvitador,
   }) {
     return _proteger(() async {
       if (nombre.trim().length < 3) {
@@ -176,7 +155,6 @@ class RepositorioSupabase implements RepositorioReferidos {
         'nombre': nombre.trim(),
         'contrasena': _contrasenaValidada(contrasena),
         'telefono': _telefonoValidado(telefono, pais),
-        'codigo_invitador': _codigoValidado(codigoInvitador),
         'huella': await _huellaDispositivo(),
         'dispositivo': (await UtilesDispositivo.leer()).aJson(),
       });
@@ -238,6 +216,65 @@ class RepositorioSupabase implements RepositorioReferidos {
     });
   }
 
+  // ---------------------------------------------------------------------
+  // Canje de invitaciones sin cuenta ni SMS
+  //
+  // Funciones publicas de la base: el anclaje del dispositivo y del telefono
+  // y todas las reglas anti-fraude se deciden alla.
+  // ---------------------------------------------------------------------
+
+  @override
+  Future<CodigoAsignado> obtenerCodigoDeEnlace(String tokenEnlace) {
+    return _proteger(() async {
+      final json = _sinError(await cliente.rpc<dynamic>(
+        'invitado_obtener_codigo',
+        params: {
+          'p_enlace': tokenEnlace,
+          'p_huella': await _huellaDispositivo(),
+          'p_dispositivo': (await UtilesDispositivo.leer()).aJson(),
+        },
+      ));
+      return CodigoAsignado(
+        codigo: json['codigo'] as String,
+        expiraEn: _fecha(json['expira_en']),
+        usado: json['usado'] as bool? ?? false,
+        nombreInvitador: json['nombre_invitador'] as String?,
+      );
+    });
+  }
+
+  @override
+  Future<ResultadoCanje> validarCodigo({
+    required String codigoInvitacion,
+    required String telefono,
+    required PaisTelefono pais,
+  }) {
+    return _proteger(() async {
+      final codigo = _codigoValidado(codigoInvitacion);
+      if (codigo == null) {
+        throw const ErrorReferidos(
+          MotivoError.codigoMalFormado,
+          'Escribe el código de invitación que te compartieron.',
+        );
+      }
+      final json = _sinError(await cliente.rpc<dynamic>(
+        'invitado_validar_codigo',
+        params: {
+          'p_codigo': codigo,
+          'p_telefono': _telefonoValidado(telefono, pais),
+          'p_huella': await _huellaDispositivo(),
+          'p_dispositivo': (await UtilesDispositivo.leer()).aJson(),
+        },
+      ));
+      return ResultadoCanje(
+        codigo: json['codigo'] as String,
+        telefonoE164: json['telefono_e164'] as String,
+        validadoEn: _fecha(json['validado_en']),
+        nombreInvitador: json['nombre_invitador'] as String?,
+      );
+    });
+  }
+
   Future<void> _guardarToken(Map<String, dynamic> json) async {
     final token = json['token_sesion'] as String?;
     if (token == null) return;
@@ -287,6 +324,22 @@ class RepositorioSupabase implements RepositorioReferidos {
         params: {'p_token': await _tokenObligatorio()},
       ));
       return _invitacionDesde(json);
+    });
+  }
+
+  @override
+  Future<EnlaceInvitacion> miEnlace(String idParticipante) {
+    return _proteger(() async {
+      final json = _sinError(await cliente.rpc<dynamic>(
+        'sesion_mi_enlace',
+        params: {'p_token': await _tokenObligatorio()},
+      ));
+      return EnlaceInvitacion(
+        token: json['token'] as String,
+        expiraEn: _fecha(json['expira_en']),
+        codigosEntregados: _entero(json['codigos_entregados']),
+        maxCodigos: _entero(json['max_codigos']),
+      );
     });
   }
 
@@ -485,6 +538,8 @@ class RepositorioSupabase implements RepositorioReferidos {
       expiraEn: _fecha(json['expira_en']),
       usadaEn: json['usada_en'] == null ? null : _fecha(json['usada_en']),
       nombreInvitado: json['nombre_invitado'] as String?,
+      destinatario: json['destinatario'] as String?,
+      telefonoInvitado: json['telefono_invitado'] as String?,
     );
   }
 

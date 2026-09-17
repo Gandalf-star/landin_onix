@@ -17,6 +17,10 @@
 --  Ingreso: celular + contraseña (`cuenta_iniciar_sesion`). No se envía
 --  ningún SMS al iniciar sesión: el teléfono es la identidad de la cuenta.
 --
+--  La cuenta es solo para quien INVITA. Quien recibe un código no se
+--  registra: abre el link, recibe su propio código y lo valida con su
+--  celular, sin SMS (docs/esquema_supabase_invitados.sql).
+--
 --  Seguridad
 --  ---------
 --  - Las funciones del registro sólo las puede ejecutar `service_role`, es
@@ -199,6 +203,20 @@ as $$
   );
 $$;
 
+-- Telefono del invitado listo para mostrar a quien invito: nunca completo.
+create or replace function public.fn_telefono_enmascarado(p_telefono text)
+returns text
+language sql
+immutable
+set search_path = public
+as $$
+  select case
+    when p_telefono is null then null
+    when p_telefono like '+56%' then '+56 9 •••• ••' || right(p_telefono, 2)
+    else '+58 4•• ••• ••' || right(p_telefono, 2)
+  end;
+$$;
+
 create or replace function public.fn_invitacion_json(i public.invitaciones)
 returns jsonb
 language sql
@@ -206,13 +224,16 @@ stable
 set search_path = public
 as $$
   select jsonb_build_object(
-    'id',              i.id,
-    'codigo',          i.codigo,
-    'creado_en',       i.creado_en,
-    'expira_en',       i.expira_en,
-    'usada_en',        i.usada_en,
-    'nombre_invitado', (select p.nombre from public.participantes p
-                          where p.id = i.usada_por_id)
+    'id',                i.id,
+    'codigo',            i.codigo,
+    'creado_en',         i.creado_en,
+    'expira_en',         i.expira_en,
+    'usada_en',          i.usada_en,
+    'destinatario',      i.destinatario,
+    'telefono_invitado', public.fn_telefono_enmascarado(i.telefono_invitado),
+    -- Solo los canjes antiguos (hechos al crear una cuenta) tienen nombre.
+    'nombre_invitado',   (select p.nombre from public.participantes p
+                            where p.id = i.usada_por_id)
   );
 $$;
 
@@ -336,11 +357,12 @@ begin
   -- Un dispositivo se ancla a un único código en toda la campaña.
   if exists (select 1 from public.invitaciones where huella_invitado = p_huella) then
     return public.fn_error_onix('dispositivoYaAnclado',
-      'Este dispositivo ya se usó para aceptar una invitación. Cada invitado debe registrarse desde su propio celular.');
+      'Este dispositivo ya se usó para aceptar una invitación. Cada invitado debe validar su código desde su propio celular.');
   end if;
 
-  -- Quien invita no puede registrar a sus invitados desde su propio
-  -- dispositivo: se compara con el del registro y con los de sus ingresos.
+  -- Quien invita no puede validar los codigos de sus invitados desde su
+  -- propio dispositivo: se compara con el del registro y con los de sus
+  -- ingresos.
   if v_invitador.huella_dispositivo = p_huella
      or exists (select 1 from public.sesiones
                  where participante_id = v_invitador.id and huella = p_huella)
@@ -348,7 +370,7 @@ begin
                  where telefono_e164 = v_invitador.telefono_e164
                    and exito and huella = p_huella) then
     return public.fn_error_onix('dispositivoDelInvitador',
-      'Este código no se puede usar desde el dispositivo de quien te invitó. Regístrate desde tu propio celular.');
+      'Este código no se puede usar desde el dispositivo de quien te invitó. Valídalo desde tu propio celular.');
   end if;
 
   return null;
@@ -384,18 +406,17 @@ as $$
 declare
   v_nombre    text := trim(coalesce(p_nombre, ''));
   v_telefono  text := trim(coalesce(p_telefono, ''));
-  v_codigo    text := nullif(upper(trim(coalesce(p_codigo_invitador, ''))), '');
+  -- El registro ya no canjea codigos: los invitados validan su codigo sin
+  -- crear cuenta (`invitado_preparar_canje`). El parametro se conserva solo
+  -- para no romper la firma que usa la Edge Function.
+  v_codigo    text := null;
   v_huella    text := left(nullif(trim(coalesce(p_huella, '')), ''), 120);
   v_dispositivo jsonb := public.fn_dispositivo_limpio(p_dispositivo);
   v_ip        inet;
   v_error     jsonb;
   v_conteo    int;
-  v_ultimo    timestamptz;
   v_pendiente public.registros_pendientes;
   c_max_por_dispositivo   constant int := 3;
-  c_max_sms_por_telefono  constant int := 5;   -- por hora
-  c_max_sms_por_ip        constant int := 10;  -- por hora
-  c_max_sms_por_huella    constant int := 6;   -- por hora
 begin
   begin
     v_ip := nullif(trim(coalesce(p_ip, '')), '')::inet;
@@ -445,56 +466,10 @@ begin
     end if;
   end if;
 
-  -- Código de invitación y anclaje del dispositivo.
-  v_error := public.fn_revisar_invitacion(v_codigo, v_telefono, v_huella);
+  -- Frenos al envío de SMS.
+  v_error := public.fn_limites_sms(v_telefono, v_ip, v_huella);
   if v_error is not null then
     return v_error;
-  end if;
-
-  -- Frenos al envío de SMS ---------------------------------------------
-  -- Cada SMS cuesta dinero: estos límites evitan que alguien use la landing
-  -- para disparar mensajes en masa (el llamado "SMS pumping").
-  select max(enviado_en), coalesce(sum(envios), 0)
-    into v_ultimo, v_conteo
-    from public.registros_pendientes
-   where telefono_e164 = v_telefono
-     and estado <> 'cancelado'
-     and creado_en > now() - interval '1 hour';
-
-  if v_ultimo is not null and v_ultimo > now() - interval '45 seconds' then
-    return public.fn_error_onix('demasiadosIntentos',
-      'Espera unos segundos antes de pedir otro código.');
-  end if;
-
-  if v_conteo >= c_max_sms_por_telefono then
-    return public.fn_error_onix('demasiadosIntentos',
-      'Pediste demasiados códigos para este número. Intenta de nuevo en una hora.');
-  end if;
-
-  if v_ip is not null then
-    select count(*) into v_conteo
-      from public.registros_pendientes
-     where ip = v_ip
-       and estado <> 'cancelado'
-       and creado_en > now() - interval '1 hour';
-
-    if v_conteo >= c_max_sms_por_ip then
-      return public.fn_error_onix('demasiadosIntentos',
-        'Hay demasiadas solicitudes desde tu conexión. Intenta de nuevo en una hora.');
-    end if;
-  end if;
-
-  if v_huella is not null then
-    select count(*) into v_conteo
-      from public.registros_pendientes
-     where huella = v_huella
-       and estado <> 'cancelado'
-       and creado_en > now() - interval '1 hour';
-
-    if v_conteo >= c_max_sms_por_huella then
-      return public.fn_error_onix('demasiadosIntentos',
-        'Hay demasiadas solicitudes desde este dispositivo. Intenta de nuevo en una hora.');
-    end if;
   end if;
 
   insert into public.registros_pendientes (
@@ -882,18 +857,23 @@ begin
       from (
         select jsonb_build_object(
                  'id',                r.id,
-                 'nombre_invitado',   split_part(trim(i.nombre), ' ', 1),
-                 'telefono_invitado',
-                   case
-                     when i.telefono_e164 like '+56%' then '+56 9 •••• ••'
-                     else '+58 4•• ••• ••'
-                   end || right(i.telefono_e164, 2),
+                 -- Sin cuenta no hay nombre propio: se usa el del contacto
+                 -- al que se le genero el codigo.
+                 'nombre_invitado',   coalesce(
+                                        split_part(trim(i.nombre), ' ', 1),
+                                        inv.destinatario,
+                                        'Invitado'),
+                 'telefono_invitado', public.fn_telefono_enmascarado(
+                                        coalesce(r.telefono_invitado,
+                                                 i.telefono_e164)),
+                 'codigo',            inv.codigo,
                  'estado',            r.estado,
                  'motivo_rechazo',    r.motivo_rechazo,
                  'creado_en',         r.creado_en
                ) as fila
           from public.referidos r
-          join public.participantes i on i.id = r.invitado_id
+          left join public.participantes i on i.id = r.invitado_id
+          left join public.invitaciones inv on inv.id = r.invitacion_id
          where r.invitador_id = v_persona.id
       ) s
   ), '[]'::jsonb);
@@ -961,6 +941,7 @@ $$;
 -- ---------------------------------------------------------------------
 revoke execute on function public.fn_participante_de_sesion(uuid)          from public, anon, authenticated;
 revoke execute on function public.fn_revisar_invitacion(text, text, text)  from public, anon, authenticated;
+revoke execute on function public.fn_telefono_enmascarado(text)            from public, anon, authenticated;
 revoke execute on function public.cuenta_preparar_registro(text, text, text, text, text, text, jsonb) from public, anon, authenticated;
 revoke execute on function public.cuenta_anular_envio(uuid)                from public, anon, authenticated;
 revoke execute on function public.cuenta_preparar_reenvio(uuid)            from public, anon, authenticated;
@@ -991,6 +972,7 @@ grant execute on function public.sesion_mis_invitaciones(uuid)             to an
 -- =====================================================================
 -- truncate public.tickets_sorteo, public.referidos, public.invitaciones,
 --          public.sesiones, public.registros_pendientes,
+--          public.enlaces_invitacion, public.intentos_canje,
 --          public.intentos_verificacion, public.intentos_ingreso,
 --          public.eventos_auditoria cascade;
 -- delete from public.participantes;

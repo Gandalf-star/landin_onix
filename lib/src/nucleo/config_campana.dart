@@ -53,16 +53,17 @@ abstract final class ConfigCampana {
           'número = una persona.',
     ),
     (
-      Icons.qr_code_2_rounded,
-      'Genera un código por invitado',
-      'Por cada persona que quieras invitar generas un código exclusivo y lo '
-          'compartes por WhatsApp. Sirve una sola vez.',
+      Icons.share_rounded,
+      'Comparte tu link',
+      'Pulsa «Compartir link por WhatsApp» y elige a todos los contactos que '
+          'quieras. Cada persona que lo abre recibe su propio código.',
     ),
     (
       Icons.phonelink_lock_rounded,
-      'Tu invitado ancla su celular',
-      'Se registra con ese código desde su propio celular, que queda anclado '
-          'al código para siempre. En ese momento sumas un ticket.',
+      'Tu invitado valida su código',
+      'Sin crear cuenta ni recibir SMS: escribe su celular y su número y su '
+          'dispositivo quedan anclados al código. En ese momento sumas un '
+          'ticket.',
     ),
     (
       Icons.redeem_rounded,
@@ -99,108 +100,6 @@ abstract final class ConfigCampana {
       'Validamos y entregamos',
       'El equipo Onix verifica el código y a tus invitados, y te contacta al '
           'número con el que te registraste para entregarte el premio.',
-    ),
-  ];
-
-  static const preguntas = <(String, String)>[
-    (
-      '¿Cuánto cuesta participar?',
-      'Nada. Participar es gratis: solo necesitas un número de teléfono '
-          'chileno o venezolano real que puedas verificar.',
-    ),
-    (
-      '¿Qué premios hay en las cajas?',
-      'Tres: 1 viaje gratis, un regalo Onix y \$3.000 de saldo Onix. Cada caja '
-          'esconde un premio distinto y te llevas el de la caja que abras.',
-    ),
-    (
-      '¿Cuándo suma un ticket un invitado?',
-      'Cuando esa persona se registra con el código que generaste para ella, '
-          'confirma su celular por SMS y lo hace desde su propio dispositivo, '
-          'que queda anclado a ese código. Los registros sin verificar no '
-          'suman.',
-    ),
-    (
-      '¿Por qué mi invitado tiene que usar su propio celular?',
-      'Porque cada dispositivo se ancla a un único código en toda la '
-          'campaña. Un celular que ya aceptó una invitación no puede aceptar '
-          'otra, y un código no se puede canjear desde el dispositivo de quien '
-          'lo generó. Así nadie suma invitados falsos desde un mismo teléfono.',
-    ),
-    (
-      '¿Se puede saber en qué caja está cada premio?',
-      'No. El orden se decide al azar en nuestro servidor en el momento en '
-          'que reclamas, cambia en cada reclamo y no llega a tu navegador '
-          'hasta que eliges. Una vez abierta la caja, la elección es '
-          'definitiva.',
-    ),
-    (
-      '¿Cómo recibo mi premio?',
-      'Tu ticket ganador trae un código de confirmación. El equipo de Onix '
-          'Drive lo verifica junto con tus invitados y te contacta al número '
-          'con el que te registraste para coordinar la entrega.',
-    ),
-    (
-      '¿Cómo vuelvo a entrar a mi cuenta?',
-      'Con tu celular y la contraseña que elegiste al registrarte. '
-          'El código por SMS se pide una sola vez, para confirmar que el '
-          'celular es tuyo al crear la cuenta.',
-    ),
-    (
-      '¿Qué pasa si alguien intenta hacer trampa?',
-      'Detectamos números virtuales, registros repetidos, dispositivos que '
-          'intentan aceptar más de una invitación y cadenas circulares. Antes '
-          'de entregar un premio revisamos cada invitado: los tickets '
-          'conseguidos con trampa se anulan y la cuenta queda fuera.',
-    ),
-    (
-      '¿Qué es Onix Drive?',
-      'Es nuestra plataforma de movilidad: pides tu viaje, pones tu precio y '
-          'te mueves con conductores verificados. Esta campaña existe para '
-          'que más gente la conozca.',
-    ),
-  ];
-
-  /// Reglas anti-trampa que se muestran publicamente: generan confianza y
-  /// desalientan el fraude antes de que ocurra.
-  static const reglasJuegoLimpio = <(IconData, String, String)>[
-    (
-      Icons.verified_user_rounded,
-      'Un teléfono, una participación',
-      'Cada cuenta se crea confirmando el celular con un código por SMS. Los '
-          'números repetidos o virtuales no pasan.',
-    ),
-    (
-      Icons.lock_clock_rounded,
-      'Cada código sirve una sola vez',
-      'El código de invitación se genera para una persona y se cierra en '
-          'cuanto ella lo usa. Quien te invitó queda grabado para siempre.',
-    ),
-    (
-      Icons.phonelink_lock_rounded,
-      'Un dispositivo, una invitación',
-      'El celular del invitado queda anclado al código que canjea. No puede '
-          'aceptar otra invitación, ni se puede usar el dispositivo de quien '
-          'invita.',
-    ),
-    (
-      Icons.inventory_2_rounded,
-      'Cajas selladas en el servidor',
-      'El orden de los premios se sortea en el servidor en cada reclamo y no '
-          'llega a tu pantalla hasta que abres tu caja. No hay forma de '
-          'espiarlo.',
-    ),
-    (
-      Icons.confirmation_number_rounded,
-      'Código de confirmación único',
-      'Cada ticket ganador lleva un código irrepetible. Sin un código válido '
-          'no hay entrega, y cada código se entrega una sola vez.',
-    ),
-    (
-      Icons.fact_check_rounded,
-      'Revisión antes de entregar',
-      'Antes de entregar revisamos los números, dispositivos y códigos de '
-          'los invitados del ganador. Los tickets con trampa se anulan.',
     ),
   ];
 }

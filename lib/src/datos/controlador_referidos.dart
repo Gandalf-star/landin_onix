@@ -7,8 +7,11 @@ import 'modelos.dart';
 import 'repositorio_memoria.dart';
 import 'repositorio_referidos.dart';
 
-/// Etapa del formulario de participacion.
+/// Etapa del formulario de participacion (crear cuenta para invitar).
 enum EtapaRegistro { datos, verificacion, listo }
+
+/// Etapa de la validacion de un codigo de invitacion (sin cuenta ni SMS).
+enum EtapaCanje { datos, listo }
 
 /// Estado compartido de la campana.
 ///
@@ -20,7 +23,6 @@ class ControladorReferidos extends ChangeNotifier {
 
   final RepositorioReferidos _repositorio;
 
-  List<FilaRanking> ranking = const [];
   Participante? participante;
   List<EventoReferido> misReferidos = const [];
   List<InvitacionEmitida> misInvitaciones = const [];
@@ -38,46 +40,87 @@ class ControladorReferidos extends ChangeNotifier {
   EtapaRegistro etapa = EtapaRegistro.datos;
   DesafioVerificacion? desafio;
 
+  EtapaCanje etapaCanje = EtapaCanje.datos;
+  ResultadoCanje? resultadoCanje;
+
+  /// Link de invitacion de quien tiene la sesion abierta. Se carga con el
+  /// panel para que «Compartir link» abra WhatsApp sin esperas: los
+  /// navegadores de celular bloquean la ventana si se abre tarde.
+  EnlaceInvitacion? enlace;
+
+  /// Codigo recien generado a mano para una persona.
+  InvitacionEmitida? ultimaInvitacion;
+
   /// Codigo de invitacion detectado en la URL (`?ref=ONX-XXXX-XXXX`).
   String? codigoInvitadorDetectado;
+
+  /// Link de invitacion detectado en la URL (`?inv=XXXXXXXXXX`).
+  String? tokenEnlaceDetectado;
+
+  /// Codigo que el link entrego a este dispositivo.
+  CodigoAsignado? codigoAsignado;
+  bool cargandoCodigoAsignado = false;
+
+  /// Por que el link no pudo entregar un codigo (vencido, propio...).
+  String? errorEnlace;
 
   bool get haySesion => participante != null;
 
   bool get modoDemostracion => _repositorio is RepositorioDemostrable;
 
-  /// Link personal para compartir. Usa el origen real del navegador cuando
-  /// esta disponible para que funcione igual en local y en produccion.
-  String linkDeInvitacion(String codigo) {
+  String get _origen {
     final base = Uri.base;
-    final origen = base.hasAuthority
-        ? '${base.scheme}://${base.authority}${base.path}'
+    // Solo el dominio: los links siempre apuntan al inicio, aunque se
+    // copien desde otra pantalla (/premios, /onix-drive...).
+    final esWeb = base.scheme == 'http' || base.scheme == 'https';
+    return esWeb && base.hasAuthority
+        ? '${base.scheme}://${base.authority}'
         : ConfigCampana.origenPorDefecto;
-    final limpio = origen.endsWith('/')
-        ? origen.substring(0, origen.length - 1)
-        : origen;
-    return '$limpio/?ref=${CodigoReferido.paraMostrar(codigo)}';
   }
 
-  /// Mensaje listo para WhatsApp con un codigo de invitacion concreto: es de
-  /// un solo uso, asi que hay que generar uno nuevo por cada persona.
+  /// Link con un codigo individual. Usa el origen real del navegador cuando
+  /// esta disponible para que funcione igual en local y en produccion.
+  String linkDeInvitacion(String codigo) =>
+      '$_origen/?ref=${CodigoReferido.paraMostrar(codigo)}';
+
+  /// Link de invitacion para compartir con muchos contactos a la vez.
+  String linkDelEnlace(EnlaceInvitacion enlace) =>
+      '$_origen/?inv=${enlace.token}';
+
+  /// Mensaje para WhatsApp con el link de invitacion. WhatsApp manda este
+  /// mismo texto a todos los contactos elegidos; el codigo de cada uno se
+  /// genera cuando abre el link.
+  String mensajeDelEnlace(Participante quien, EnlaceInvitacion enlace) {
+    return '¡Hola! Soy ${quien.primerNombre}. Me estoy moviendo con '
+        '${ConfigCampana.nombreMarca} y hay premios por invitar.\n\n'
+        'Abre este link desde tu celular: te da un código exclusivo para ti '
+        'y lo validas solo con tu número, sin crear cuenta.\n'
+        '${linkDelEnlace(enlace)}';
+  }
+
+  /// Mensaje con un codigo individual, para una sola persona.
   String mensajeDeInvitacion(Participante quien, InvitacionEmitida invitacion) {
     final link = linkDeInvitacion(invitacion.codigo);
     return '¡Hola! Soy ${quien.primerNombre}. Me estoy moviendo con '
         '${ConfigCampana.nombreMarca} y hay premios por invitar.\n\n'
         'Este código es exclusivo para ti: ${invitacion.codigoVisible}\n'
-        'Regístrate aquí y participa tú también:\n$link';
+        'Valídalo aquí con tu número (no necesitas crear cuenta):\n$link';
   }
+
+  /// Abre WhatsApp con [mensaje] sin destinatario: en el celular se elige a
+  /// uno o varios contactos en la lista de WhatsApp.
+  static Uri enlaceWhatsApp(String mensaje) =>
+      Uri.parse('https://wa.me/?text=${Uri.encodeComponent(mensaje)}');
 
   Future<void> inicializar() async {
     _leerCodigoDeLaUrl();
     try {
       participante = await _repositorio.sesionActual();
-      ranking = await _repositorio.obtenerRanking(
-        idParticipante: participante?.id,
-      );
       if (participante != null) {
         etapa = EtapaRegistro.listo;
         await _recargarPanel();
+      } else if (tokenEnlaceDetectado != null) {
+        await _cargarCodigoAsignado();
       }
     } on ErrorReferidos catch (error) {
       mensajeError = error.mensaje;
@@ -88,6 +131,10 @@ class ControladorReferidos extends ChangeNotifier {
   }
 
   void _leerCodigoDeLaUrl() {
+    final token = Uri.base.queryParameters['inv'];
+    if (token != null) {
+      tokenEnlaceDetectado = CodigoReferido.normalizarToken(token);
+    }
     final crudo = Uri.base.queryParameters['ref'] ??
         Uri.base.queryParameters['r'] ??
         Uri.base.fragment.split('ref=').skip(1).join();
@@ -97,6 +144,28 @@ class ControladorReferidos extends ChangeNotifier {
       codigoInvitadorDetectado = normalizado;
     }
   }
+
+  /// Pide al servidor el codigo que el link entrega a este dispositivo.
+  Future<void> _cargarCodigoAsignado() async {
+    final token = tokenEnlaceDetectado;
+    if (token == null) return;
+    cargandoCodigoAsignado = true;
+    errorEnlace = null;
+    notifyListeners();
+    try {
+      codigoAsignado = await _repositorio.obtenerCodigoDeEnlace(token);
+    } on ErrorReferidos catch (error) {
+      errorEnlace = error.mensaje;
+    } catch (_) {
+      errorEnlace = 'No pudimos cargar tu código. Revisa tu conexión y vuelve '
+          'a abrir el link.';
+    } finally {
+      cargandoCodigoAsignado = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> reintentarCodigoAsignado() => _cargarCodigoAsignado();
 
   void limpiarError() {
     if (mensajeError == null) return;
@@ -118,7 +187,6 @@ class ControladorReferidos extends ChangeNotifier {
     required String contrasena,
     required String telefono,
     required PaisTelefono pais,
-    String? codigoInvitador,
   }) {
     return _ejecutar(() async {
       desafio = await _repositorio.iniciarRegistro(
@@ -126,7 +194,6 @@ class ControladorReferidos extends ChangeNotifier {
         contrasena: contrasena,
         telefono: telefono,
         pais: pais,
-        codigoInvitador: codigoInvitador,
       );
       etapa = EtapaRegistro.verificacion;
     });
@@ -178,6 +245,23 @@ class ControladorReferidos extends ChangeNotifier {
     });
   }
 
+  /// Quien fue invitado valida su codigo con su celular, sin cuenta ni
+  /// SMS: el codigo queda anclado a su telefono y a su dispositivo.
+  Future<bool> validarCodigo({
+    required String codigoInvitacion,
+    required String telefono,
+    required PaisTelefono pais,
+  }) {
+    return _ejecutar(() async {
+      resultadoCanje = await _repositorio.validarCodigo(
+        codigoInvitacion: codigoInvitacion,
+        telefono: telefono,
+        pais: pais,
+      );
+      etapaCanje = EtapaCanje.listo;
+    });
+  }
+
   Future<void> refrescar() async {
     if (participante == null) return;
     await _ejecutar(() async {
@@ -186,16 +270,36 @@ class ControladorReferidos extends ChangeNotifier {
     });
   }
 
-  /// Genera un codigo de invitacion nuevo, de un solo uso, listo para
-  /// compartir con la proxima persona que se quiera invitar por WhatsApp.
+  /// Genera un codigo individual, de un solo uso, para una persona.
   Future<bool> generarInvitacion() {
     return _ejecutar(() async {
       if (participante == null) return;
       final invitacion = await _repositorio.generarInvitacion(
         participante!.id,
       );
+      ultimaInvitacion = invitacion;
       misInvitaciones = [invitacion, ...misInvitaciones];
     });
+  }
+
+  /// Vuelve a pedir el link de invitacion (por si el anterior se lleno o
+  /// esta por vencer). Con [silencioso] un fallo no muestra ningun aviso:
+  /// se usa para las renovaciones automaticas en segundo plano.
+  Future<void> actualizarEnlace({bool silencioso = false}) async {
+    if (participante == null) return;
+    try {
+      enlace = await _repositorio.miEnlace(participante!.id);
+      notifyListeners();
+    } on ErrorReferidos catch (error) {
+      if (silencioso) return;
+      mensajeError = error.mensaje;
+      notifyListeners();
+    } catch (_) {
+      if (silencioso) return;
+      mensajeError = 'No pudimos cargar tu link. Revisa tu conexión e intenta '
+          'de nuevo.';
+      notifyListeners();
+    }
   }
 
   /// «Reclamar premio»: deja listas las tres cajas cerradas. El orden de
@@ -264,10 +368,11 @@ class ControladorReferidos extends ChangeNotifier {
     participante = null;
     misReferidos = const [];
     misInvitaciones = const [];
+    ultimaInvitacion = null;
+    enlace = null;
     reclamo = null;
     desafio = null;
     etapa = EtapaRegistro.datos;
-    ranking = await _repositorio.obtenerRanking();
     notifyListeners();
   }
 
@@ -278,12 +383,12 @@ class ControladorReferidos extends ChangeNotifier {
       _repositorio.misReferidos(id),
       _repositorio.misInvitaciones(id),
       _repositorio.miReclamo(id),
-      _repositorio.obtenerRanking(idParticipante: id),
+      _repositorio.miEnlace(id),
     ]);
     misReferidos = resultados[0] as List<EventoReferido>;
     misInvitaciones = resultados[1] as List<InvitacionEmitida>;
     reclamo = resultados[2] as ReclamoPremio?;
-    ranking = resultados[3] as List<FilaRanking>;
+    enlace = resultados[3] as EnlaceInvitacion;
   }
 
   /// Envuelve una operacion con el manejo comun de carga y errores.

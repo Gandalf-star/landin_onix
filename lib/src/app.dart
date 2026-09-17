@@ -5,6 +5,7 @@ import 'datos/controlador_referidos.dart';
 import 'nucleo/arranque.dart';
 import 'nucleo/config_campana.dart';
 import 'nucleo/tema_onix.dart';
+import 'ui/navegacion.dart';
 import 'ui/pagina_landing.dart';
 
 /// Deja el [ControladorReferidos] disponible para todo el arbol de widgets.
@@ -71,8 +72,33 @@ class _AplicacionOnixState extends State<AplicacionOnix> {
         debugShowCheckedModeBanner: false,
         theme: construirTemaOnix(),
         scrollBehavior: const _DesplazamientoWeb(),
-        home: PaginaLanding(arranque: widget.arranque),
+        initialRoute: PaginaOnix.inicio.ruta,
+        onGenerateRoute: _ruta,
+        // Si alguien entra directo a /premios, el inicio queda debajo: el
+        // boton «Participar» vuelve a el sin recargar.
+        onGenerateInitialRoutes: (ruta) {
+          final pagina = PaginaOnix.desdeRuta(ruta) ?? PaginaOnix.inicio;
+          return [
+            _ruta(RouteSettings(name: PaginaOnix.inicio.ruta)),
+            if (pagina != PaginaOnix.inicio)
+              _ruta(RouteSettings(name: pagina.ruta)),
+          ];
+        },
       ),
+    );
+  }
+
+  /// Cada pantalla entra con un fundido corto. Una direccion desconocida
+  /// muestra el inicio.
+  Route<void> _ruta(RouteSettings ajustes) {
+    final pagina = PaginaOnix.desdeRuta(ajustes.name) ?? PaginaOnix.inicio;
+    return PageRouteBuilder<void>(
+      settings: RouteSettings(name: pagina.ruta),
+      transitionDuration: const Duration(milliseconds: 260),
+      reverseTransitionDuration: const Duration(milliseconds: 200),
+      pageBuilder: (_, _, _) => paginaPara(pagina, widget.arranque),
+      transitionsBuilder: (_, animacion, _, hijo) =>
+          FadeTransition(opacity: animacion, child: hijo),
     );
   }
 }

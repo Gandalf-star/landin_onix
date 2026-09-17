@@ -1,8 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../app.dart';
+import '../../datos/controlador_referidos.dart';
 import '../../datos/modelos.dart';
 import '../../nucleo/config_campana.dart';
 import '../../nucleo/tema_onix.dart';
@@ -142,10 +145,9 @@ class _Encabezado extends StatelessWidget {
   }
 }
 
-/// Genera y comparte codigos de invitacion de un solo uso. Cada vez que se
-/// quiere invitar a una persona nueva hay que generar un codigo exclusivo
-/// para ella: no existe un codigo propio y fijo para reutilizar.
-class _TarjetaInvitaciones extends StatefulWidget {
+/// Invitar: el link para compartir con muchos contactos a la vez y, si se
+/// quiere, un código individual para una persona.
+class _TarjetaInvitaciones extends StatelessWidget {
   const _TarjetaInvitaciones({
     required this.participante,
     required this.invitaciones,
@@ -155,58 +157,276 @@ class _TarjetaInvitaciones extends StatefulWidget {
   final List<InvitacionEmitida> invitaciones;
 
   @override
-  State<_TarjetaInvitaciones> createState() => _TarjetaInvitacionesState();
-}
-
-class _TarjetaInvitacionesState extends State<_TarjetaInvitaciones> {
-  String? _idRecienGenerada;
-
-  @override
   Widget build(BuildContext context) {
     final controlador = ProveedorCampana.de(context);
-    InvitacionEmitida? activa;
-    for (final invitacion in widget.invitaciones) {
-      if (invitacion.id == _idRecienGenerada) {
-        activa = invitacion;
-        break;
-      }
-    }
+    final individual = controlador.ultimaInvitacion;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        if (activa != null)
+        _BloqueEnlace(participante: participante, enlace: controlador.enlace),
+        const SizedBox(height: 12),
+        if (individual != null) ...[
           _BloqueCodigoActivo(
-            participante: widget.participante,
-            invitacion: activa,
-          )
-        else
-          const _BloqueSinCodigoActivo(),
-        const SizedBox(height: 14),
-        BotonDorado(
+            participante: participante,
+            invitacion: individual,
+          ),
+          const SizedBox(height: 12),
+        ],
+        BotonFantasma(
           texto: 'Generar código para invitar',
-          icono: Icons.add_circle_rounded,
+          icono: Icons.add_circle_outline_rounded,
+          sobreFondoOscuro: false,
           expandido: true,
-          cargando: controlador.procesando,
-          alPresionar: () async {
-            final ok = await controlador.generarInvitacion();
-            if (ok && mounted) {
-              setState(() {
-                _idRecienGenerada = controlador.misInvitaciones.first.id;
-              });
-            }
-          },
+          alPresionar: controlador.procesando
+              ? null
+              : () => controlador.generarInvitacion(),
         ),
-        if (widget.invitaciones.isNotEmpty) ...[
+        const SizedBox(height: 6),
+        const Text(
+          'Un código individual sirve para mandarlo a una sola persona por '
+          'otro medio.',
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            color: ColoresOnix.textoSuave,
+            fontSize: 12,
+            height: 1.4,
+          ),
+        ),
+        if (invitaciones.isNotEmpty) ...[
           const SizedBox(height: 20),
-          _ListaInvitaciones(invitaciones: widget.invitaciones),
+          _ListaInvitaciones(invitaciones: invitaciones),
         ],
       ],
     );
   }
 }
 
-/// Bloque azul con el código activo, listo para copiar o compartir.
+/// El link de invitacion: se comparte por WhatsApp con muchos contactos y
+/// cada persona que lo abre recibe su propio codigo.
+///
+/// Un link entrega un maximo de codigos; cuando se llena, el servidor
+/// devuelve uno nuevo. Por eso el link se renueva solo cada cierto tiempo y
+/// despues de cada envio, para no compartir nunca uno que ya se lleno.
+class _BloqueEnlace extends StatefulWidget {
+  const _BloqueEnlace({required this.participante, required this.enlace});
+
+  final Participante participante;
+  final EnlaceInvitacion? enlace;
+
+  @override
+  State<_BloqueEnlace> createState() => _BloqueEnlaceState();
+}
+
+class _BloqueEnlaceState extends State<_BloqueEnlace> {
+  static const _cadaCuanto = Duration(minutes: 2);
+
+  Timer? _renovacion;
+
+  @override
+  void initState() {
+    super.initState();
+    _renovacion = Timer.periodic(_cadaCuanto, (_) => _renovarEnlace());
+  }
+
+  @override
+  void dispose() {
+    _renovacion?.cancel();
+    super.dispose();
+  }
+
+  void _renovarEnlace() {
+    if (!mounted) return;
+    unawaited(
+      ProveedorCampana.accion(context).actualizarEnlace(silencioso: true),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final controlador = ProveedorCampana.de(context);
+    final participante = widget.participante;
+    final enlace = widget.enlace;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 20),
+      decoration: BoxDecoration(
+        gradient: GradientesOnix.fondoOscuro,
+        borderRadius: BorderRadius.circular(MedidasOnix.radioGrande),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const Text(
+            'INVITA A TUS CONTACTOS',
+            style: TextStyle(
+              color: ColoresOnix.sobreAzulSuave,
+              fontSize: 11,
+              fontWeight: FontWeight.w800,
+              letterSpacing: 1.4,
+            ),
+          ),
+          const SizedBox(height: 10),
+          const Text(
+            'Comparte tu link y elige en WhatsApp a todos los que quieras.',
+            style: TextStyle(
+              fontFamily: 'Manrope',
+              color: ColoresOnix.blanco,
+              fontSize: 19,
+              height: 1.25,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          const SizedBox(height: 14),
+          const _PasoEnlace(
+            numero: '1',
+            texto: 'Cada persona que abra el link recibe su propio código, '
+                'distinto al de los demás.',
+          ),
+          const SizedBox(height: 16),
+          Container(height: 1, color: ColoresOnix.bordeSobreAzul),
+          const SizedBox(height: 14),
+          if (enlace == null)
+            Row(
+              children: [
+                const Expanded(
+                  child: Text(
+                    'Preparando tu link…',
+                    style: TextStyle(
+                      color: ColoresOnix.sobreAzul,
+                      fontSize: 12.5,
+                    ),
+                  ),
+                ),
+                _BotonIcono(
+                  icono: Icons.refresh_rounded,
+                  tooltip: 'Volver a intentar',
+                  alPresionar: controlador.actualizarEnlace,
+                ),
+              ],
+            )
+          else ...[
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    controlador.linkDelEnlace(enlace),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: ColoresOnix.sobreAzul,
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                _BotonIcono(
+                  icono: Icons.link_rounded,
+                  tooltip: 'Copiar link',
+                  alPresionar: () => _copiar(
+                    context,
+                    controlador.linkDelEnlace(enlace),
+                    'Link copiado',
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            Text(
+              '${enlace.codigosEntregados} de ${enlace.maxCodigos} códigos '
+              'entregados con este link',
+              style: const TextStyle(
+                color: ColoresOnix.sobreAzulSuave,
+                fontSize: 11.5,
+                fontFeatures: [FontFeature.tabularFigures()],
+              ),
+            ),
+          ],
+          const SizedBox(height: 16),
+          BotonDorado(
+            texto: 'Compartir link por WhatsApp',
+            icono: Icons.chat_rounded,
+            expandido: true,
+            // Se abre en el mismo toque, sin esperar al servidor: si no, el
+            // navegador del celular bloquea la ventana de WhatsApp.
+            alPresionar: enlace == null
+                ? null
+                : () {
+                    _abrirWhatsApp(
+                      controlador.mensajeDelEnlace(participante, enlace),
+                    );
+                    _renovarEnlace();
+                  },
+          ),
+          const SizedBox(height: 10),
+          BotonFantasma(
+            texto: 'Copiar mensaje',
+            icono: Icons.content_copy_rounded,
+            sobreFondoOscuro: true,
+            expandido: true,
+            alPresionar: enlace == null
+                ? null
+                : () {
+                    _copiar(
+                      context,
+                      controlador.mensajeDelEnlace(participante, enlace),
+                      'Mensaje copiado',
+                    );
+                    _renovarEnlace();
+                  },
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _PasoEnlace extends StatelessWidget {
+  const _PasoEnlace({required this.numero, required this.texto});
+
+  final String numero;
+  final String texto;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          width: 22,
+          height: 22,
+          alignment: Alignment.center,
+          decoration: const BoxDecoration(
+            color: ColoresOnix.amarilloOnix,
+            shape: BoxShape.circle,
+          ),
+          child: Text(
+            numero,
+            style: const TextStyle(
+              color: ColoresOnix.azulOnix,
+              fontSize: 11.5,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Text(
+            texto,
+            style: const TextStyle(
+              color: ColoresOnix.sobreAzul,
+              fontSize: 12.5,
+              height: 1.45,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// Código individual recién generado, listo para copiar o enviar.
 class _BloqueCodigoActivo extends StatelessWidget {
   const _BloqueCodigoActivo({
     required this.participante,
@@ -219,169 +439,97 @@ class _BloqueCodigoActivo extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final controlador = ProveedorCampana.de(context);
+    final mensaje = controlador.mensajeDeInvitacion(participante, invitacion);
 
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 20),
+      padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        gradient: GradientesOnix.fondoOscuro,
+        color: ColoresOnix.amarilloClaro,
         borderRadius: BorderRadius.circular(MedidasOnix.radioGrande),
+        border: Border.all(
+          color: ColoresOnix.amarilloOnix.withValues(alpha: 0.6),
+        ),
       ),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           const Text(
             'CÓDIGO PARA TU PRÓXIMO INVITADO',
             style: TextStyle(
-              color: ColoresOnix.sobreAzulSuave,
+              color: ColoresOnix.azulOnix,
               fontSize: 11,
               fontWeight: FontWeight.w800,
               letterSpacing: 1.4,
             ),
           ),
-          const SizedBox(height: 10),
-          Row(
-            children: [
-              Expanded(
-                child: FittedBox(
-                  fit: BoxFit.scaleDown,
-                  alignment: Alignment.centerLeft,
-                  child: Text(
-                    invitacion.codigoVisible,
-                    style: const TextStyle(
-                      fontFamily: 'Manrope',
-                      color: ColoresOnix.amarilloOnix,
-                      fontSize: 30,
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: 1.5,
-                    ),
-                  ),
-                ),
-              ),
-              _BotonIcono(
-                icono: Icons.copy_rounded,
-                tooltip: 'Copiar código',
-                alPresionar: () => _copiar(
-                  context,
-                  invitacion.codigoVisible,
-                  'Código copiado',
-                ),
-              ),
-            ],
-          ),
           const SizedBox(height: 8),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(
+              invitacion.codigoVisible,
+              style: const TextStyle(
+                fontFamily: 'Manrope',
+                color: ColoresOnix.azulOnix,
+                fontSize: 28,
+                fontWeight: FontWeight.w800,
+                letterSpacing: 1.5,
+              ),
+            ),
+          ),
+          const SizedBox(height: 4),
           const Text(
-            'Vale solo para una persona: en cuanto se registre con él, '
-            'se cierra.',
+            'Sirve para una sola persona. Mándalo por separado: si lo pones en '
+            'un mensaje para varios, solo el primero que lo valide suma.',
             style: TextStyle(
-              color: ColoresOnix.sobreAzulSuave,
-              fontSize: 11.5,
+              color: ColoresOnix.azulOnix,
+              fontSize: 12,
               height: 1.4,
             ),
           ),
           const SizedBox(height: 14),
-          Container(height: 1, color: ColoresOnix.bordeSobreAzul),
-          const SizedBox(height: 14),
-          Builder(
-            builder: (contexto) {
-              final link = controlador.linkDeInvitacion(invitacion.codigo);
-              return Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      link,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        color: ColoresOnix.sobreAzul,
-                        fontSize: 12.5,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
+          Row(
+            children: [
+              Expanded(
+                child: FilledButton.icon(
+                  onPressed: () => _abrirWhatsApp(mensaje),
+                  icon: const Icon(Icons.chat_rounded, size: 18),
+                  label: const Text('Enviar código'),
+                  style: FilledButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(vertical: 14),
                   ),
-                  const SizedBox(width: 8),
-                  _BotonIcono(
-                    icono: Icons.link_rounded,
-                    tooltip: 'Copiar link',
-                    alPresionar: () =>
-                        _copiar(contexto, link, 'Link copiado'),
-                  ),
-                ],
-              );
-            },
-          ),
-          const SizedBox(height: 18),
-          BotonDorado(
-            texto: 'Compartir por WhatsApp',
-            icono: Icons.chat_rounded,
-            expandido: true,
-            alPresionar: () async {
-              final mensaje =
-                  controlador.mensajeDeInvitacion(participante, invitacion);
-              final destino = Uri.parse(
-                'https://wa.me/?text=${Uri.encodeComponent(mensaje)}',
-              );
-              await launchUrl(destino, mode: LaunchMode.externalApplication);
-            },
-          ),
-          const SizedBox(height: 10),
-          BotonFantasma(
-            texto: 'Copiar mensaje de invitación',
-            icono: Icons.content_copy_rounded,
-            sobreFondoOscuro: true,
-            expandido: true,
-            alPresionar: () => _copiar(
-              context,
-              controlador.mensajeDeInvitacion(participante, invitacion),
-              'Mensaje copiado',
-            ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              IconButton.outlined(
+                tooltip: 'Copiar mensaje',
+                onPressed: () => _copiar(context, mensaje, 'Mensaje copiado'),
+                icon: const Icon(Icons.content_copy_rounded, size: 18),
+              ),
+            ],
           ),
         ],
       ),
-    );
-  }
-
-  void _copiar(BuildContext context, String texto, String aviso) {
-    Clipboard.setData(ClipboardData(text: texto));
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(aviso), duration: const Duration(seconds: 2)),
     );
   }
 }
 
-/// Estado inicial: todavia no se genero ningun codigo, o el ultimo generado
-/// ya se uso o vencio.
-class _BloqueSinCodigoActivo extends StatelessWidget {
-  const _BloqueSinCodigoActivo();
+/// Abre WhatsApp con el mensaje y sin destinatario: en el celular se eligen
+/// uno o varios contactos de la lista.
+void _abrirWhatsApp(String mensaje) {
+  unawaited(
+    launchUrl(
+      ControladorReferidos.enlaceWhatsApp(mensaje),
+      mode: LaunchMode.externalApplication,
+    ),
+  );
+}
 
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(
-        color: ColoresOnix.fondo,
-        borderRadius: BorderRadius.circular(MedidasOnix.radioGrande),
-        border: Border.all(color: ColoresOnix.borde),
-      ),
-      child: const Row(
-        children: [
-          Icon(Icons.qr_code_2_rounded, color: ColoresOnix.textoSuave),
-          SizedBox(width: 12),
-          Expanded(
-            child: Text(
-              'Genera un código para invitar a la próxima persona. Cada '
-              'código sirve una sola vez.',
-              style: TextStyle(
-                color: ColoresOnix.textoSuave,
-                fontSize: 13,
-                height: 1.45,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
+void _copiar(BuildContext context, String texto, String aviso) {
+  Clipboard.setData(ClipboardData(text: texto));
+  ScaffoldMessenger.of(context).showSnackBar(
+    SnackBar(content: Text(aviso), duration: const Duration(seconds: 2)),
+  );
 }
 
 class _BotonIcono extends StatelessWidget {
@@ -471,6 +619,12 @@ class _FilaInvitacion extends StatelessWidget {
       EstadoInvitacion.pendiente => (ColoresOnix.ambar, Icons.schedule_rounded),
       EstadoInvitacion.expirada => (ColoresOnix.rojo, Icons.block_rounded),
     };
+    final detalle = switch (invitacion.estado) {
+      EstadoInvitacion.usada =>
+        'Validado · ${invitacion.telefonoInvitado ?? invitacion.nombreInvitado ?? 'invitado verificado'}',
+      EstadoInvitacion.pendiente => 'Entregado · esperando que lo valide',
+      EstadoInvitacion.expirada => 'Venció sin usarse',
+    };
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
@@ -497,9 +651,9 @@ class _FilaInvitacion extends StatelessWidget {
                 ),
                 const SizedBox(height: 2),
                 Text(
-                  invitacion.nombreInvitado != null
-                      ? 'Usado por ${invitacion.nombreInvitado}'
-                      : 'Sin usar todavía',
+                  detalle,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
                     color: ColoresOnix.textoSuave,
                     fontSize: 11.5,
@@ -508,6 +662,7 @@ class _FilaInvitacion extends StatelessWidget {
               ],
             ),
           ),
+          const SizedBox(width: 8),
           EtiquetaEstado(
             texto: invitacion.estado.etiqueta,
             color: color,
@@ -518,6 +673,7 @@ class _FilaInvitacion extends StatelessWidget {
     );
   }
 }
+
 
 /// Premio: el botón «Reclamar premio», las cajas pendientes de elegir o el
 /// ticket ya ganado, según en qué punto esté el reclamo.
@@ -756,8 +912,8 @@ class _Avance extends StatelessWidget {
               ? '¡Completaste los ${ConfigCampana.metaTickets} tickets! Tu '
                   'premio está listo para reclamar.'
               : 'Te faltan $faltan ${faltan == 1 ? 'ticket' : 'tickets'} '
-                  'para reclamar tu premio. Cada invitado que se registra '
-                  'desde su propio celular suma uno.',
+                  'para reclamar tu premio. Cada invitado que valida su '
+                  'código desde su propio celular suma uno.',
           style: const TextStyle(
             color: ColoresOnix.textoSuave,
             fontSize: 13,
@@ -864,8 +1020,8 @@ class _ListaInvitados extends StatelessWidget {
             Icon(Icons.group_add_rounded, color: ColoresOnix.textoSuave),
             SizedBox(height: 10),
             Text(
-              'Todavía no tienes invitados.\nGenera un código, compártelo y '
-              'suma tu primer ticket.',
+              'Todavía no tienes invitados.\nComparte tu link: sumas un '
+              'ticket cuando cada contacto valida su código.',
               textAlign: TextAlign.center,
               style: TextStyle(
                 color: ColoresOnix.textoSuave,

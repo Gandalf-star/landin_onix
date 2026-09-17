@@ -156,10 +156,10 @@ class _DiscursoHero extends StatelessWidget {
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 540),
             child: Text(
-              'Genera un código exclusivo para cada persona que invites. '
-              'Cuando se registra desde su propio celular sumas un ticket, y '
-              'con ${ConfigCampana.metaTickets} tickets eliges una de tres '
-              'cajas cerradas: te llevas el premio que esconde.',
+              'Comparte tu link por WhatsApp: cada contacto que lo abre recibe '
+              'su propio código. Cuando lo valida desde su celular sumas un '
+              'ticket, y con ${ConfigCampana.metaTickets} tickets eliges una de '
+              'tres cajas cerradas: te llevas el premio que esconde.',
               textAlign: alineacionTexto,
               style: Theme.of(context).textTheme.bodyLarge?.copyWith(
                     color: ColoresOnix.sobreAzulSuave,

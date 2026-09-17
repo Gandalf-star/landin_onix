@@ -1,11 +1,14 @@
 # Reto 50 Onix · Landing de sorteo y referidos
 
 Landing page en **Flutter Web** para la campaña de referidos que promociona
-**Onix Drive** en Chile y Venezuela. La persona crea su cuenta (nombre,
-celular y contraseña) confirmando su celular con un código por SMS y, por cada persona
-que quiere invitar, genera un código exclusivo de un solo uso para compartir
-por WhatsApp. Cada invitado que se registra con ese código desde **su propio
-celular** (el dispositivo queda anclado al código) suma **un ticket**. Con
+**Onix Drive** en Chile y Venezuela. Quien quiere invitar crea su cuenta
+(nombre, celular y contraseña) confirmando su celular con un código por SMS y
+pulsa «Compartir link por WhatsApp»: en WhatsApp elige a todos los contactos
+que quiera. Todos reciben el mismo link, pero **cada persona que lo abre en su
+celular recibe su propio código**, atado a ese dispositivo. La persona
+invitada **no crea cuenta ni recibe SMS**: escribe su celular, valida el
+código y éste queda anclado a su número y a su dispositivo. En ese momento
+quien la invitó suma **un ticket**. Con
 **50 tickets** se reclama el premio: se elige una de **tres cajas cerradas**
 y se gana lo que esconde (1 viaje gratis, un regalo Onix o $3.000 de saldo
 Onix), con un ticket ganador y su código de confirmación.
@@ -29,18 +32,20 @@ flutter build web --release    # producción, queda en build/web
 
 En VS Code basta con **F5** (configuraciones en `.vscode/launch.json`).
 
-Para probar el flujo de invitación, primero entra al panel de un participante
-y pulsa «Generar código para invitar» para conseguir un código de un solo uso;
-después abre la landing con ese código en la URL:
+Para probar el flujo de invitación, entra al panel de un participante y copia
+el link de «Invita a tus contactos» (o pulsa «Compartir link por WhatsApp»).
+Después ábrelo en **otro navegador o dispositivo**:
 
 ```
-http://localhost:PUERTO/?ref=ONX-XXXX-XXXX
+http://localhost:PUERTO/?inv=XXXXXXXXXX     link para muchos contactos
+http://localhost:PUERTO/?ref=ONX-XXXX-XXXX  código individual
 ```
 
-El código aparece bloqueado en el formulario y queda ligado al registro. Al
-usarse, ese código concreto se cierra: para invitar a otra persona hay que
-generar uno nuevo. Ojo al probar: el invitado debe registrarse desde **otro
-navegador o dispositivo** que el de quien invita (el anclaje lo bloquea).
+La tarjeta se abre en «Tengo un código» con un código exclusivo ya escrito:
+basta el celular para validarlo, sin cuenta ni SMS. Cada navegador distinto que
+abre el link recibe un código distinto; el mismo navegador recibe siempre el
+mismo. Desde el dispositivo de quien invita el link no entrega códigos (el
+anclaje lo bloquea), y un número sólo puede validar una invitación.
 
 Abajo a la izquierda, un distintivo indica de dónde salen los datos: verde
 «Datos en vivo · Supabase» o ámbar «Datos de demostración» con el motivo por el
@@ -73,8 +78,9 @@ llegar a los 50 tickets y abrir las cajas (y «Reiniciar premio» para repetir).
 
 | Momento | Qué se pide | SMS |
 | --- | --- | --- |
-| **Crear cuenta** | Nombre, celular, contraseña y código de invitación (opcional) | Sí, una sola vez, con Twilio Verify |
+| **Crear cuenta** (quien invita) | Nombre, celular y contraseña | Sí, una sola vez, con Twilio Verify |
 | **Iniciar sesión** | Celular y contraseña | No |
+| **Validar un código** (quien fue invitado) | Su celular (el código lo entrega el link), **sin cuenta** | **No** |
 
 El registro es de dos pasos y la cuenta **no existe** hasta que Twilio aprueba
 el código:
@@ -90,13 +96,23 @@ Navegador ──► Edge Function (código) ──► Twilio VerificationCheck
                                             crea la cuenta y abre la sesión
 ```
 
+La invitación no pasa por Twilio, sólo por funciones públicas de la base:
+
+```
+Quien invita ──► sesion_mi_enlace ──► link ?inv=XXXXXXXXXX ──► WhatsApp (muchos contactos)
+
+Cada contacto ──► invitado_obtener_codigo ──► su propio código, atado a su dispositivo
+              ──► invitado_validar_codigo ──► ancla teléfono y dispositivo, suma el ticket
+```
+
 - Las credenciales de Twilio viven **sólo** como secretos de la Edge Function.
-- Las funciones SQL del registro sólo las puede ejecutar `service_role` (la Edge
-  Function): nadie puede crear una cuenta saltándose Twilio con la anon key.
+- Las funciones SQL del registro sólo las puede ejecutar `service_role` (la
+  Edge Function): nadie puede crear una cuenta saltándose Twilio con la anon
+  key. Las del canje son públicas y aplican todas las reglas en la base.
 - La contraseña se guarda cifrada con bcrypt. Tras 5 intentos fallidos el
   número queda bloqueado 15 minutos.
-- Límites contra el abuso de SMS: 45 s entre envíos, 5 SMS por número por hora,
-  10 por IP y 6 por dispositivo.
+- Límites contra el abuso de SMS: 45 s entre envíos, 5 SMS por número por
+  hora, 10 por IP y 6 por dispositivo.
 
 ## Supabase
 
@@ -130,7 +146,7 @@ El `.env` está en `.gitignore`. Nunca poner ahí la `service_role` key ni las
 credenciales de Twilio: en una app web todo lo que se empaqueta llega al
 navegador.
 
-El esquema vive partido en cuatro archivos y `esquema_supabase_completo.sql`
+El esquema vive partido en cinco archivos y `esquema_supabase_completo.sql`
 es la unión de todos, que es lo que se pega. Después de tocar cualquiera hay
 que regenerarlo:
 
@@ -224,7 +240,7 @@ lib/
     ui/
       pagina_landing.dart         Composición de la página
       secciones/                  Hero, premios, reclamo, ranking, FAQ, ...
-      registro/                   Formulario, verificación e ingreso
+      registro/                   Validar código, crear cuenta, verificación e ingreso
       panel/                      Panel del participante
       premio/                     Cajas, confeti, ticket y escena del reclamo
       componentes/                Piezas reutilizables
@@ -238,9 +254,10 @@ docs/
   esquema_supabase_completo.sql   ← el que se pega en Supabase (generado)
   esquema_supabase.sql            Tablas de la campaña, anclaje, RLS, vistas
   esquema_supabase_cuentas.sql    Cuentas, sesiones y registro con Twilio
+  esquema_supabase_invitados.sql  Links de invitación y canje sin cuenta ni SMS
   esquema_supabase_premios.sql    Reclamo y apertura de las tres cajas
   esquema_supabase_admin.sql      Cuentas y funciones del panel admin
-  generar_esquema_completo.py     Une los cuatro en el completo
+  generar_esquema_completo.py     Une los cinco en el completo
 .env                              Credenciales públicas (no se versiona)
 ```
 
@@ -256,19 +273,30 @@ Hay que ejecutarlo antes del lanzamiento.
 
 ## Reglas anti-trampa
 
-- Un teléfono verificado equivale a una persona: `telefono_e164` es único y
+- Un teléfono verificado equivale a una cuenta: `telefono_e164` es único y
   se confirma con Twilio antes de crear la cuenta.
-- Cada código de invitación es de **un solo uso**: se genera para una persona
-  concreta y, en cuanto se canjea (o vence el plazo), queda cerrado para
-  siempre. Para invitar a alguien más hay que generar uno nuevo.
-- El código con el que alguien se registró se graba y es **inmutable**: nadie
-  puede volver a aplicarlo ni reasignarlo.
-- Una persona sólo puede figurar como invitada una vez en toda la campaña.
-- **Anclaje del dispositivo**: el navegador desde el que el invitado canjea
+- Cada código de invitación es de **un solo uso** y, en cuanto se valida (o
+  vence el plazo), queda cerrado para siempre.
+- **Un código por dispositivo**: el link entrega un código distinto a cada
+  dispositivo que lo abre, y ese código sólo se valida desde ese mismo
+  dispositivo. Quien borra los datos del navegador o usa incógnito vuelve a
+  recibir el mismo código (misma firma y conexión). Máximo 50 códigos por
+  link y 30 por conexión cada hora.
+- Una invitación validada es **inmutable**: nadie puede volver a usarla ni
+  reasignarla (trigger).
+- **Anclaje del teléfono**: el número queda anclado al código que valida
+  (índice único). Un número sólo puede aceptar una invitación en toda la
+  campaña, y nunca la de su propio dueño. Sin SMS, se rechazan además los
+  números obviamente inventados.
+- **Anclaje del dispositivo**: el navegador desde el que el invitado valida
   el código queda anclado a ese código (índice único en la base). Un
   dispositivo no puede aceptar una segunda invitación, y un código no se
-  puede canjear desde el dispositivo de quien lo generó (ni desde uno donde
-  inició sesión). Sin anclaje no hay ticket.
+  puede validar desde el dispositivo de quien lo generó (ni desde uno donde
+  inició sesión, ni con su misma firma y conexión de registro). Tampoco
+  valida un dispositivo con la firma y la conexión de otro invitado ya
+  validado de la misma persona. Sin los dos anclajes no hay ticket.
+- Freno a quien prueba links o códigos al azar: 8 inválidos por
+  dispositivo y 20 por IP cada hora.
 - Quien borra los datos del navegador o usa modo incógnito obtiene una
   huella nueva, pero la **firma del navegador** (pantalla, idioma, zona
   horaria, motor gráfico…) y la IP quedan guardadas: el panel admin marca las

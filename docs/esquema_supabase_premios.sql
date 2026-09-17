@@ -3,8 +3,8 @@
 --
 --  Cómo funciona
 --  -------------
---  1. Cada invitado que se registra con un código, verifica su teléfono y
---     ancla su dispositivo suma un ticket a quien lo invitó. Con 50
+--  1. Cada invitado que valida su código (sin crear cuenta), verifica su
+--     teléfono y ancla su dispositivo suma un ticket a quien lo invitó. Con 50
 --     tickets aparece el botón «Reclamar premio».
 --  2. `sesion_reclamar_premio` crea el reclamo y en ese mismo instante
 --     esconde los tres premios (1 viaje gratis, un regalo Onix y $3.000 de

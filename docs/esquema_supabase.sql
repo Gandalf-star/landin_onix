@@ -218,6 +218,85 @@ alter table public.invitaciones
   add constraint invitacion_anclada
   check (usada_en is null or huella_invitado is not null) not valid;
 
+-- ---------------------------------------------------------------------
+-- Canje sin cuenta: el invitado solo escribe el codigo y su celular
+--
+-- Desde esta version la persona invitada NO crea una cuenta: valida el
+-- codigo con su numero (verificado por SMS) y en ese momento la
+-- invitacion queda anclada a su dispositivo Y a su telefono. Por eso la
+-- invitacion guarda el telefono del invitado y `usada_por_id` pasa a ser
+-- opcional (solo lo llenan los canjes antiguos, hechos al registrarse).
+-- ---------------------------------------------------------------------
+alter table public.invitaciones
+  add column if not exists telefono_invitado text;
+-- Nombre del contacto al que se le genero el codigo (lo elige quien
+-- invita). Es solo una etiqueta para su panel: no restringe el canje.
+alter table public.invitaciones
+  add column if not exists destinatario text;
+
+alter table public.invitaciones
+  drop constraint if exists destinatario_razonable;
+alter table public.invitaciones
+  add constraint destinatario_razonable
+  check (destinatario is null or char_length(destinatario) between 1 and 60);
+
+-- Canjes antiguos: el telefono sale de la cuenta que se creo con el codigo.
+update public.invitaciones i
+   set telefono_invitado = p.telefono_e164
+  from public.participantes p
+ where p.id = i.usada_por_id
+   and i.telefono_invitado is null;
+
+-- Una invitacion usada tiene quien la uso: una cuenta (canje antiguo) o un
+-- telefono verificado (canje sin cuenta). Una sin usar no tiene ninguno.
+alter table public.invitaciones
+  drop constraint if exists usada_es_consistente;
+alter table public.invitaciones
+  add constraint usada_es_consistente
+  check (
+    case when usada_en is null
+      then usada_por_id is null and telefono_invitado is null
+      else usada_por_id is not null or telefono_invitado is not null
+    end
+  );
+
+-- Anclaje del telefono: un numero acepta UNA sola invitacion en toda la
+-- campana, igual que el dispositivo.
+create unique index if not exists idx_invitaciones_telefono_invitado
+  on public.invitaciones (telefono_invitado)
+  where telefono_invitado is not null;
+
+-- Los referidos de un canje sin cuenta no tienen fila en `participantes`:
+-- se identifican por la invitacion canjeada y el telefono verificado.
+alter table public.referidos
+  alter column invitado_id drop not null;
+alter table public.referidos
+  add column if not exists invitacion_id uuid
+  references public.invitaciones (id) on delete cascade;
+alter table public.referidos
+  add column if not exists telefono_invitado text;
+
+create unique index if not exists idx_referidos_invitacion
+  on public.referidos (invitacion_id)
+  where invitacion_id is not null;
+create unique index if not exists idx_referidos_telefono_invitado
+  on public.referidos (telefono_invitado)
+  where telefono_invitado is not null;
+
+update public.referidos r
+   set invitacion_id     = i.id,
+       telefono_invitado = p.telefono_e164
+  from public.participantes p
+  join public.invitaciones i on i.usada_por_id = p.id
+ where r.invitado_id = p.id
+   and r.invitacion_id is null;
+
+alter table public.referidos
+  drop constraint if exists referido_identificado;
+alter table public.referidos
+  add constraint referido_identificado
+  check (invitado_id is not null or invitacion_id is not null);
+
 -- Ahora que `invitaciones` existe, se cierra la relacion circular: el
 -- codigo_invitador de un participante debe ser un codigo de invitacion real.
 alter table public.participantes

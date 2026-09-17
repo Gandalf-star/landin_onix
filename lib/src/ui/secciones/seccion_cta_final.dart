@@ -87,7 +87,7 @@ class SeccionCtaFinal extends StatelessWidget {
                     const SizedBox(height: 32),
                     BotonDorado(
                       texto: haySesion ? 'Ir a mi panel' : 'Quiero participar',
-                      icono: Icons.arrow_upward_rounded,
+                      icono: Icons.arrow_forward_rounded,
                       alPresionar: alParticipar,
                     ),
                   ],

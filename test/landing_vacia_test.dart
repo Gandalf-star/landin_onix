@@ -9,27 +9,19 @@ import 'package:onix_referidos/src/utiles/telefono.dart';
 import 'package:onix_referidos/src/ui/secciones/seccion_como_funciona.dart';
 import 'package:onix_referidos/src/ui/secciones/seccion_cta_final.dart';
 import 'package:onix_referidos/src/ui/secciones/seccion_hero.dart';
-import 'package:onix_referidos/src/ui/secciones/seccion_juego_limpio.dart';
+import 'package:onix_referidos/src/ui/secciones/pie_pagina.dart';
 import 'package:onix_referidos/src/ui/secciones/seccion_onix_drive.dart';
-import 'package:onix_referidos/src/ui/secciones/seccion_preguntas.dart';
 import 'package:onix_referidos/src/ui/secciones/seccion_premios.dart';
-import 'package:onix_referidos/src/ui/secciones/seccion_ranking.dart';
 import 'package:onix_referidos/src/ui/secciones/seccion_reclamo.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 /// Repositorio que devuelve lo mismo que un proyecto Supabase recién creado:
-/// cero participantes, ranking vacío y ninguna sesión abierta.
+/// cero participantes y ninguna sesión abierta.
 ///
 /// El repositorio en memoria siembra datos de ejemplo, así que hasta ahora
 /// la landing nunca se había probado con la campaña realmente vacía, que es
 /// justo el estado en el que la ve la primera persona que entra.
 class _RepositorioVacio implements RepositorioReferidos {
-  @override
-  Future<List<FilaRanking>> obtenerRanking({
-    int limite = 10,
-    String? idParticipante,
-  }) async => const [];
-
   @override
   Future<Participante?> sesionActual() async => null;
 
@@ -38,6 +30,10 @@ class _RepositorioVacio implements RepositorioReferidos {
 
   @override
   Future<InvitacionEmitida> generarInvitacion(String idParticipante) async =>
+      throw UnimplementedError();
+
+  @override
+  Future<EnlaceInvitacion> miEnlace(String idParticipante) async =>
       throw UnimplementedError();
 
   @override
@@ -51,7 +47,17 @@ class _RepositorioVacio implements RepositorioReferidos {
     required String contrasena,
     required String telefono,
     required PaisTelefono pais,
-    String? codigoInvitador,
+  }) async => throw UnimplementedError();
+
+  @override
+  Future<CodigoAsignado> obtenerCodigoDeEnlace(String tokenEnlace) async =>
+      throw UnimplementedError();
+
+  @override
+  Future<ResultadoCanje> validarCodigo({
+    required String codigoInvitacion,
+    required String telefono,
+    required PaisTelefono pais,
   }) async => throw UnimplementedError();
 
   @override
@@ -113,86 +119,83 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  testWidgets('con la campaña vacía se montan todas las secciones', (
-    tester,
-  ) async {
-    await montar(tester, const Size(1440, 2400));
+  SingleChildScrollView paginaVisible(WidgetTester tester) => tester
+      .widget<SingleChildScrollView>(find.byType(SingleChildScrollView).last);
 
-    // Cada sección de la página debe existir en el árbol aunque no haya
-    // ningún participante todavía.
-    expect(find.byType(SeccionHero), findsOneWidget, reason: 'hero');
-    expect(find.byType(SeccionComoFunciona), findsOneWidget, reason: 'cómo');
-    expect(find.byType(SeccionPremios), findsOneWidget, reason: 'premios');
-    expect(find.byType(SeccionReclamo), findsOneWidget, reason: 'reclamo');
-    expect(find.byType(SeccionRanking), findsOneWidget, reason: 'ranking');
-    expect(find.byType(SeccionJuegoLimpio), findsOneWidget, reason: 'juego');
-    expect(find.byType(SeccionOnixDrive), findsOneWidget, reason: 'onix');
-    expect(find.byType(SeccionPreguntas), findsOneWidget, reason: 'preguntas');
-    expect(find.byType(SeccionCtaFinal), findsOneWidget, reason: 'cta');
-  });
+  testWidgets('el inicio solo muestra el hero y el pie', (tester) async {
+    await montar(tester, const Size(1440, 1600));
 
-  testWidgets('las secciones ocupan alto real, no quedan colapsadas', (
-    tester,
-  ) async {
-    await montar(tester, const Size(1440, 2400));
-
-    for (final entrada in <String, Type>{
-      'hero': SeccionHero,
-      'cómo funciona': SeccionComoFunciona,
-      'premios': SeccionPremios,
-      'ranking': SeccionRanking,
-      'preguntas': SeccionPreguntas,
-    }.entries) {
-      final alto = tester.getSize(find.byType(entrada.value)).height;
-      expect(
-        alto,
-        greaterThan(100),
-        reason: 'la sección ${entrada.key} quedó con alto $alto',
-      );
+    expect(find.byType(SeccionHero), findsOneWidget);
+    expect(find.byType(PiePagina), findsOneWidget);
+    for (final tipo in [
+      SeccionComoFunciona,
+      SeccionPremios,
+      SeccionReclamo,
+      SeccionOnixDrive,
+      SeccionCtaFinal,
+    ]) {
+      expect(find.byType(tipo), findsNothing, reason: '$tipo no va al inicio');
     }
+    // Ya no existen el ranking, el juego limpio ni las preguntas.
+    expect(find.text('Quiénes van adelante'), findsNothing);
+    expect(find.text('Preguntas'), findsNothing);
   });
 
-  testWidgets('los enlaces del encabezado desplazan la pagina', (tester) async {
-    // Alto de ventana real de navegador: el hero ocupa toda la pantalla y
-    // hay que desplazarse para ver el resto. Es el escenario en el que la
-    // persona dice "solo veo el encabezado".
-    await montar(tester, const Size(1440, 900));
-
-    final desplazador = tester
-        .widget<SingleChildScrollView>(find.byType(SingleChildScrollView).first)
-        .controller!;
-    expect(desplazador.offset, 0, reason: 'arranca arriba del todo');
-
-    await tester.tap(find.text('Premios').first);
-    await tester.pumpAndSettle();
-
-    expect(
-      desplazador.offset,
-      greaterThan(0),
-      reason: 'tocar "Premios" en el encabezado tiene que desplazar',
-    );
-  });
-
-  testWidgets('la pagina se puede desplazar con la rueda del raton', (
+  testWidgets('cada enlace de la barra abre su propia pantalla', (
     tester,
   ) async {
-    await montar(tester, const Size(1440, 900));
+    await montar(tester, const Size(1440, 1600));
 
-    final desplazador = tester
-        .widget<SingleChildScrollView>(find.byType(SingleChildScrollView).first)
-        .controller!;
+    final destinos = <String, List<Type>>{
+      'Cómo funciona': [SeccionComoFunciona, SeccionCtaFinal],
+      'Premios': [SeccionPremios, SeccionReclamo, SeccionCtaFinal],
+      'Onix Drive': [SeccionOnixDrive, SeccionCtaFinal],
+    };
+    for (final MapEntry(key: enlace, value: tipos) in destinos.entries) {
+      await tester.tap(find.text(enlace).last);
+      await tester.pumpAndSettle();
+      for (final tipo in tipos) {
+        expect(find.byType(tipo), findsOneWidget, reason: '$enlace: $tipo');
+        final alto = tester.getSize(find.byType(tipo)).height;
+        expect(alto, greaterThan(100), reason: '$enlace: $tipo quedó con $alto');
+      }
+      expect(find.byType(SeccionHero), findsNothing);
+    }
 
-    // Se arrastra desde un punto del cuerpo de la pagina, por debajo de la
-    // barra de navegacion: si se toma el centro del widget, el puntero cae
-    // sobre la barra y es ella la que recibe el gesto.
-    await tester.dragFrom(const Offset(720, 600), const Offset(0, -600));
+    // «Participar» vuelve al inicio, con el formulario.
+    await tester.tap(find.text('Participar'));
+    await tester.pumpAndSettle();
+    expect(find.byType(SeccionHero), findsOneWidget);
+    expect(find.byType(SeccionPremios), findsNothing);
+  });
+
+  testWidgets('el botón del llamado final vuelve al inicio', (tester) async {
+    await montar(tester, const Size(1440, 1600));
+    await tester.tap(find.text('Premios').last);
     await tester.pumpAndSettle();
 
-    expect(
-      desplazador.offset,
-      greaterThan(0),
-      reason: 'la pagina tiene que desplazarse al arrastrar',
-    );
+    await tester.ensureVisible(find.text('Quiero participar'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Quiero participar'));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(SeccionHero), findsOneWidget);
+  });
+
+  testWidgets('las pantallas se pueden desplazar hacia abajo', (tester) async {
+    await montar(tester, const Size(1440, 900));
+
+    for (final enlace in ['Premios', 'Cómo funciona', 'Onix Drive']) {
+      await tester.tap(find.text(enlace).last);
+      await tester.pumpAndSettle();
+      final desplazador = paginaVisible(tester).controller!;
+      expect(desplazador.offset, 0, reason: '$enlace arranca arriba');
+
+      // Se arrastra desde el cuerpo de la pagina, por debajo de la barra.
+      await tester.dragFrom(const Offset(720, 600), const Offset(0, -500));
+      await tester.pumpAndSettle();
+      expect(desplazador.offset, greaterThan(0), reason: '$enlace se desplaza');
+    }
   });
 
   testWidgets('la zona visible ocupa toda la ventana, no solo el encabezado', (
@@ -200,24 +203,28 @@ void main() {
   ) async {
     // Regresion: `Scaffold` da al body restricciones de alto sueltas y un
     // `Stack` suelto se encoge hasta su hijo no posicionado mas grande, que
-    // es la barra de navegacion. Cuando eso pasa, la landing entera queda
+    // es la barra de navegacion. Cuando eso pasa, la pagina entera queda
     // comprimida en una franja de 88 px y solo se ve el encabezado.
     const alto = 900.0;
     await montar(tester, const Size(1440, alto));
+    await tester.tap(find.text('Premios').last);
+    await tester.pumpAndSettle();
 
-    final desplazador = tester
-        .widget<SingleChildScrollView>(find.byType(SingleChildScrollView).first)
-        .controller!;
-
-    expect(
-      desplazador.position.viewportDimension,
-      alto,
-      reason: 'la pagina debe ocupar el alto completo de la ventana',
-    );
+    final desplazador = paginaVisible(tester).controller!;
+    expect(desplazador.position.viewportDimension, alto);
     expect(
       desplazador.position.maxScrollExtent,
       greaterThan(alto),
-      reason: 'y tiene que haber contenido por debajo del pliegue',
+      reason: 'tiene que haber contenido por debajo del pliegue',
     );
+  });
+
+  testWidgets('en computador se ve la barra de desplazamiento', (tester) async {
+    await montar(tester, const Size(1440, 900));
+    await tester.tap(find.text('Premios').last);
+    await tester.pumpAndSettle();
+
+    final barras = tester.widgetList<Scrollbar>(find.byType(Scrollbar));
+    expect(barras.any((barra) => barra.thumbVisibility == true), isTrue);
   });
 }

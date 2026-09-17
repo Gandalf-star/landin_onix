@@ -107,8 +107,6 @@
     window.addEventListener('flutter-first-frame', function () {
       var carga = document.getElementById('carga-onix');
       if (!carga) return;
-      document.documentElement.style.overflow = 'auto';
-      document.body.style.overflow = 'auto';
       carga.classList.add('oculto');
       setTimeout(function () { carga.remove(); }, 500);
     });

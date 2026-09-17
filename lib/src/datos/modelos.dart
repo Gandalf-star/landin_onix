@@ -6,8 +6,9 @@ import '../utiles/telefono.dart';
 
 /// Estado de un referido dentro del embudo.
 ///
-/// - [pendiente] el invitado se registro pero aun no verifico su telefono.
-/// - [valido]    verificado y con su dispositivo anclado: suma un ticket.
+/// - [pendiente] en revision: todavia no suma.
+/// - [valido]    codigo validado, con el telefono y el dispositivo del
+///               invitado anclados: suma un ticket.
 /// - [rechazado] descartado por el motor anti-fraude o por revision manual.
 enum EstadoReferido {
   pendiente,
@@ -42,11 +43,11 @@ class Participante {
   final String nombre;
   final String telefonoE164;
 
-  /// Codigo de invitacion de un solo uso que se canjeo al registrarse. Se
-  /// fija UNA sola vez y despues es inmutable: ahi vive la garantia de "un
-  /// codigo por persona". No es un codigo propio para compartir: para eso
-  /// existen las invitaciones que genera cada participante (ver
-  /// [InvitacionEmitida]).
+  /// Codigo de invitacion que se canjeo al registrarse, en el flujo
+  /// antiguo. Hoy los invitados validan su codigo sin crear cuenta, asi que
+  /// en las cuentas nuevas queda vacio. No es un codigo propio para
+  /// compartir: para eso existen las invitaciones que genera cada
+  /// participante (ver [InvitacionEmitida]).
   final String? codigoInvitador;
 
   final DateTime creadoEn;
@@ -98,7 +99,9 @@ class Participante {
   }
 }
 
-/// Una invitacion concreta: quien invito a quien y en que estado quedo.
+/// Una invitacion que ya sumo (o que se reviso): a quien corresponde y en
+/// que estado quedo. El invitado no tiene cuenta, asi que se le reconoce
+/// por su telefono enmascarado y el codigo que valido.
 @immutable
 class EventoReferido {
   const EventoReferido({
@@ -129,8 +132,8 @@ class EventoReferido {
 
 /// Estado de un codigo de invitacion de un solo uso.
 ///
-/// - [pendiente] se genero y todavia no lo canjea nadie.
-/// - [usada]     ya lo canjeo la persona a la que se le compartio.
+/// - [pendiente] se genero y todavia no lo valida nadie.
+/// - [usada]     ya lo valido la persona a la que se le compartio.
 /// - [expirada]  nadie lo canjeo antes de vencer el plazo.
 enum EstadoInvitacion {
   pendiente,
@@ -139,7 +142,7 @@ enum EstadoInvitacion {
 
   String get etiqueta => switch (this) {
         EstadoInvitacion.pendiente => 'Pendiente',
-        EstadoInvitacion.usada => 'Usada',
+        EstadoInvitacion.usada => 'Validado',
         EstadoInvitacion.expirada => 'Expirada',
       };
 }
@@ -147,9 +150,10 @@ enum EstadoInvitacion {
 /// Un codigo de invitacion de un solo uso, generado para compartir con UNA
 /// persona concreta por WhatsApp.
 ///
-/// A diferencia de un codigo personal fijo, este codigo solo sirve para que
-/// una unica persona se registre: en cuanto alguien lo canjea (o vence el
-/// plazo) deja de servir, y para invitar a alguien mas hay que generar otro.
+/// A diferencia de un codigo personal fijo, este codigo solo sirve para una
+/// unica persona: en cuanto alguien lo valida (o vence el plazo) deja de
+/// servir, y para invitar a alguien mas hay que generar otro. Los codigos
+/// que entrega un link de invitacion son distintos para cada dispositivo.
 @immutable
 class InvitacionEmitida {
   const InvitacionEmitida({
@@ -159,6 +163,8 @@ class InvitacionEmitida {
     required this.expiraEn,
     this.usadaEn,
     this.nombreInvitado,
+    this.destinatario,
+    this.telefonoInvitado,
   });
 
   final String id;
@@ -173,9 +179,16 @@ class InvitacionEmitida {
   /// Momento en que alguien lo canjeo, o `null` si sigue pendiente.
   final DateTime? usadaEn;
 
-  /// Nombre de quien lo canjeo. Solo se llena una vez que [usadaEn] no es
-  /// nulo.
+  /// Nombre de la cuenta que lo canjeo (solo en canjes antiguos, hechos al
+  /// registrarse).
   final String? nombreInvitado;
+
+  /// Contacto para el que se genero el codigo. Es una etiqueta para el
+  /// panel de quien invita: no limita quien puede validarlo.
+  final String? destinatario;
+
+  /// Telefono enmascarado de quien lo valido.
+  final String? telefonoInvitado;
 
   String get codigoVisible => CodigoReferido.paraMostrar(codigo);
 
@@ -184,24 +197,6 @@ class InvitacionEmitida {
     if (DateTime.now().isAfter(expiraEn)) return EstadoInvitacion.expirada;
     return EstadoInvitacion.pendiente;
   }
-}
-
-/// Fila del ranking publico. Nunca expone el telefono completo.
-@immutable
-class FilaRanking {
-  const FilaRanking({
-    required this.posicion,
-    required this.nombreVisible,
-    required this.telefonoEnmascarado,
-    required this.referidosValidos,
-    this.soyYo = false,
-  });
-
-  final int posicion;
-  final String nombreVisible;
-  final String telefonoEnmascarado;
-  final int referidosValidos;
-  final bool soyYo;
 }
 
 /// Los tres premios que se esconden en las cajas.
@@ -305,7 +300,68 @@ class ReclamoPremio {
   }
 }
 
-/// Verificacion del telefono pendiente de confirmacion, durante el registro.
+/// Resultado de validar un codigo de invitacion sin cuenta.
+@immutable
+class ResultadoCanje {
+  const ResultadoCanje({
+    required this.codigo,
+    required this.telefonoE164,
+    required this.validadoEn,
+    this.nombreInvitador,
+  });
+
+  final String codigo;
+  final String telefonoE164;
+  final DateTime validadoEn;
+
+  /// Primer nombre de quien genero el codigo y acaba de sumar el ticket.
+  final String? nombreInvitador;
+
+  String get codigoVisible => CodigoReferido.paraMostrar(codigo);
+}
+
+/// Link de invitacion de quien invita. Se comparte por WhatsApp con muchos
+/// contactos a la vez y cada persona que lo abre recibe su propio codigo.
+@immutable
+class EnlaceInvitacion {
+  const EnlaceInvitacion({
+    required this.token,
+    required this.expiraEn,
+    this.codigosEntregados = 0,
+    this.maxCodigos = 50,
+  });
+
+  final String token;
+  final DateTime expiraEn;
+
+  /// Cuantas personas ya abrieron el link y recibieron su codigo.
+  final int codigosEntregados;
+  final int maxCodigos;
+}
+
+/// Codigo exclusivo que recibe quien abre un link de invitacion. Queda
+/// atado al dispositivo que abrio el link.
+@immutable
+class CodigoAsignado {
+  const CodigoAsignado({
+    required this.codigo,
+    required this.expiraEn,
+    this.usado = false,
+    this.nombreInvitador,
+  });
+
+  final String codigo;
+  final DateTime expiraEn;
+
+  /// Este dispositivo ya lo valido antes.
+  final bool usado;
+  final String? nombreInvitador;
+
+  String get codigoVisible => CodigoReferido.paraMostrar(codigo);
+}
+
+/// Verificacion del telefono pendiente de confirmacion, al crear una cuenta.
+/// Los invitados validan su codigo sin SMS.
 ///
 /// En Supabase el codigo lo envia Twilio Verify por SMS; [id] identifica el
 /// registro pendiente que espera ese codigo.

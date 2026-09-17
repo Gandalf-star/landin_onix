@@ -49,41 +49,36 @@ class ErrorReferidos implements Exception {
 /// [RepositorioEnMemoria] para desarrollo; manana la implementara
 /// `RepositorioSupabase` sin que haya que tocar una sola pantalla.
 abstract interface class RepositorioReferidos {
-  /// Ranking publico de invitadores.
-  Future<List<FilaRanking>> obtenerRanking({
-    int limite = 10,
-    String? idParticipante,
-  });
-
   /// Participante de la sesion guardada en este navegador, si existe.
   Future<Participante?> sesionActual();
 
   /// Cierra la sesion local (no borra datos del servidor).
   Future<void> cerrarSesion();
 
-  /// Genera un codigo de invitacion nuevo y de un solo uso, listo para
-  /// compartir por WhatsApp con una persona concreta.
+  /// Genera un codigo de invitacion nuevo y de un solo uso, para compartir
+  /// con una persona concreta.
   Future<InvitacionEmitida> generarInvitacion(String idParticipante);
+
+  /// Link de invitacion vigente del participante (se crea si no tiene uno
+  /// con cupo). Se comparte por WhatsApp con muchos contactos a la vez.
+  Future<EnlaceInvitacion> miEnlace(String idParticipante);
 
   /// Codigos de invitacion que emitio este participante, del mas reciente
   /// al mas antiguo (pendientes, usados y vencidos).
   Future<List<InvitacionEmitida>> misInvitaciones(String idParticipante);
 
-  /// Paso 1 del registro: valida los datos y envia el codigo de verificacion
-  /// por SMS.
+  /// Paso 1 del registro (solo para quien invita): valida los datos y envia
+  /// el codigo de verificacion por SMS.
   ///
   /// Aqui se aplican las reglas que no dependen de haber verificado el
-  /// telefono todavia (formato, telefono ya registrado,
-  /// contrasena debil, autorreferido, codigo inexistente, limite por
-  /// dispositivo y anclaje: si trae codigo, el dispositivo no puede haber
-  /// aceptado otra invitacion ni ser el de quien invita). La cuenta todavia
-  /// NO existe al terminar este paso.
+  /// telefono todavia (formato, telefono ya registrado, contrasena debil y
+  /// limite por dispositivo). La cuenta todavia NO existe al terminar este
+  /// paso. El registro no canjea codigos: eso lo hace [validarCodigo].
   Future<DesafioVerificacion> iniciarRegistro({
     required String nombre,
     required String contrasena,
     required String telefono,
     required PaisTelefono pais,
-    String? codigoInvitador,
   });
 
   /// Ingreso de alguien que ya tiene cuenta: celular y contrasena, sin SMS.
@@ -95,9 +90,6 @@ abstract interface class RepositorioReferidos {
 
   /// Paso 2 del registro: confirma el codigo recibido, crea la cuenta y
   /// devuelve al participante con la sesion abierta.
-  ///
-  /// Solo en este momento el dispositivo queda anclado al codigo y el
-  /// referido pasa a `valido`, sumando un ticket a quien invito.
   Future<Participante> confirmarVerificacion({
     required String idDesafio,
     required String codigo,
@@ -105,6 +97,24 @@ abstract interface class RepositorioReferidos {
 
   /// Reenvia el codigo de verificacion respetando el limite de frecuencia.
   Future<DesafioVerificacion> reenviarCodigo(String idDesafio);
+
+  /// Quien abre un link de invitacion recibe su propio codigo, atado a
+  /// este dispositivo. Si ya lo habia abierto, recibe el mismo.
+  Future<CodigoAsignado> obtenerCodigoDeEnlace(String tokenEnlace);
+
+  /// Valida un codigo de invitacion SIN cuenta ni SMS: el codigo queda
+  /// anclado al telefono y al dispositivo, y suma un ticket a quien invito.
+  ///
+  /// Reglas: el codigo existe, no se uso y no vencio; si salio de un link,
+  /// solo lo valida el dispositivo que abrio el link; el telefono es creible,
+  /// no es el de quien invita y no acepto otra invitacion; el dispositivo no
+  /// acepto otra invitacion ni es el de quien invita; no hay cadenas
+  /// circulares; y hay un freno a quien prueba codigos al azar.
+  Future<ResultadoCanje> validarCodigo({
+    required String codigoInvitacion,
+    required String telefono,
+    required PaisTelefono pais,
+  });
 
   /// Invitados de un participante, del mas reciente al mas antiguo.
   Future<List<EventoReferido>> misReferidos(String idParticipante);

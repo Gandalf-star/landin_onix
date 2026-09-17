@@ -2,15 +2,14 @@
 //  Reto 50 Onix · Edge Function `verificar-telefono`
 //
 //  Confirma con Twilio Verify que el teléfono con el que alguien crea su
-//  cuenta existe y es suyo. Solo se usa al REGISTRARSE: para iniciar
-//  sesión la landing usa el celular y la contraseña, sin SMS.
+//  cuenta existe y es suyo. Solo se usa al CREAR UNA CUENTA (quien invita):
+//  para iniciar sesión se usa el celular y la contraseña, y quien recibe
+//  una invitación valida su código sin SMS (`invitado_validar_codigo`).
 //
 //  Acciones (POST con JSON `{ "accion": ... }`):
-//    - iniciar_registro  valida los datos (incluido el anclaje del
-//                        dispositivo al código de invitación), guarda el
-//                        registro pendiente y pide a Twilio que envíe el
-//                        código por SMS.
-//    - reenviar          vuelve a enviar el código respetando los límites.
+//    - iniciar_registro  valida los datos de la cuenta, guarda el registro
+//                        pendiente y pide a Twilio que envíe el SMS.
+//    - reenviar          vuelve a enviar el código del registro.
 //    - confirmar         revisa el código con Twilio y, si lo aprueba,
 //                        crea la cuenta y abre la sesión.
 //    - estado            diagnóstico: dice si Twilio está configurado.
@@ -268,19 +267,30 @@ function ipDe(peticion: Request): string | null {
     null;
 }
 
-async function iniciarRegistro(datos: Json, peticion: Request) {
+/** Funciones SQL de cada paso de un flujo que pasa por un SMS. */
+type Flujo = {
+  preparar: string;
+  anular: string;
+  prepararReenvio: string;
+  paraVerificar: string;
+  registrarFallo: string;
+  completar: string;
+};
+
+const flujoRegistro: Flujo = {
+  preparar: "cuenta_preparar_registro",
+  anular: "cuenta_anular_envio",
+  prepararReenvio: "cuenta_preparar_reenvio",
+  paraVerificar: "cuenta_registro_para_verificar",
+  registrarFallo: "cuenta_registrar_fallo",
+  completar: "cuenta_completar_registro",
+};
+
+/** Deja lista la espera en la base y, si todo está en orden, envía el SMS. */
+async function iniciar(flujo: Flujo, parametros: Json) {
   if (!twilioConfigurado()) return sinServicioSms();
 
-  const pendiente = await rpc("cuenta_preparar_registro", {
-    p_nombre: texto(datos.nombre),
-    p_contrasena: texto(datos.contrasena),
-    p_telefono: texto(datos.telefono),
-    p_codigo_invitador: texto(datos.codigo_invitador),
-    p_huella: texto(datos.huella),
-    p_ip: ipDe(peticion),
-    // Si trae código de invitación, este dispositivo queda anclado a él.
-    p_dispositivo: objeto(datos.dispositivo),
-  });
+  const pendiente = await rpc(flujo.preparar, parametros);
   if (esError(pendiente)) return responder(pendiente);
 
   const desafio = pendiente as Json;
@@ -289,17 +299,31 @@ async function iniciarRegistro(datos: Json, peticion: Request) {
   const rechazo = (await revisarTipoLinea(telefono)) ??
     (await enviarCodigo(telefono));
   if (rechazo) {
-    // El SMS no salió: ese registro no debe contar para los límites.
-    await rpc("cuenta_anular_envio", { p_id: desafio.id });
+    // El SMS no salió: esa espera no debe contar para los límites.
+    await rpc(flujo.anular, { p_id: desafio.id });
     return rechazo;
   }
   return responder(desafio);
 }
 
-async function reenviar(datos: Json) {
+async function iniciarRegistro(datos: Json, peticion: Request) {
+  return await iniciar(flujoRegistro, {
+    p_nombre: texto(datos.nombre),
+    p_contrasena: texto(datos.contrasena),
+    p_telefono: texto(datos.telefono),
+    // El registro no canjea códigos: los invitados validan el suyo sin
+    // cuenta ni SMS.
+    p_codigo_invitador: null,
+    p_huella: texto(datos.huella),
+    p_ip: ipDe(peticion),
+    p_dispositivo: objeto(datos.dispositivo),
+  });
+}
+
+async function reenviar(flujo: Flujo, datos: Json) {
   if (!twilioConfigurado()) return sinServicioSms();
 
-  const desafio = await rpc("cuenta_preparar_reenvio", {
+  const desafio = await rpc(flujo.prepararReenvio, {
     p_id: texto(datos.id),
   });
   if (esError(desafio)) return responder(desafio);
@@ -308,7 +332,7 @@ async function reenviar(datos: Json) {
   return fallo ?? responder(desafio);
 }
 
-async function confirmar(datos: Json) {
+async function confirmar(flujo: Flujo, datos: Json) {
   if (!twilioConfigurado()) return sinServicioSms();
 
   const id = texto(datos.id);
@@ -320,7 +344,7 @@ async function confirmar(datos: Json) {
     );
   }
 
-  const pendiente = await rpc("cuenta_registro_para_verificar", { p_id: id });
+  const pendiente = await rpc(flujo.paraVerificar, { p_id: id });
   if (esError(pendiente)) return responder(pendiente);
 
   const aprobado = await revisarCodigo(
@@ -330,9 +354,9 @@ async function confirmar(datos: Json) {
   if (aprobado instanceof Response) return aprobado;
 
   if (!aprobado) {
-    return responder(await rpc("cuenta_registrar_fallo", { p_id: id }));
+    return responder(await rpc(flujo.registrarFallo, { p_id: id }));
   }
-  return responder(await rpc("cuenta_completar_registro", { p_id: id }));
+  return responder(await rpc(flujo.completar, { p_id: id }));
 }
 
 // ---------------------------------------------------------------------
@@ -359,9 +383,9 @@ Deno.serve(async (peticion) => {
       case "iniciar_registro":
         return await iniciarRegistro(datos, peticion);
       case "reenviar":
-        return await reenviar(datos);
+        return await reenviar(flujoRegistro, datos);
       case "confirmar":
-        return await confirmar(datos);
+        return await confirmar(flujoRegistro, datos);
       case "estado":
         return responder({
           twilio_configurado: twilioConfigurado(),

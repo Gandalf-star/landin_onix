@@ -315,14 +315,28 @@ begin
                                     when i.expira_en < now() then 'expirada'
                                     else 'pendiente'
                                   end,
-                   'invitado',    case when inv.id is null then null else
-                                    jsonb_build_object(
-                                      'id',             inv.id,
-                                      'nombre',         inv.nombre,
-                                      'telefono_e164',  inv.telefono_e164,
-                                      'estado',         inv.estado,
-                                      'creado_en',      inv.creado_en
-                                    ) end,
+                   -- Canje antiguo: el invitado creó una cuenta. Canje
+                   -- actual: sólo hay un teléfono verificado, sin cuenta.
+                   'invitado',    case
+                                    when inv.id is not null then
+                                      jsonb_build_object(
+                                        'id',             inv.id,
+                                        'nombre',         inv.nombre,
+                                        'telefono_e164',  inv.telefono_e164,
+                                        'estado',         inv.estado,
+                                        'creado_en',      inv.creado_en,
+                                        'con_cuenta',     true)
+                                    when i.telefono_invitado is not null then
+                                      jsonb_build_object(
+                                        'id',             '',
+                                        'nombre',         coalesce(i.destinatario,
+                                                                   'Invitado sin cuenta'),
+                                        'telefono_e164',  i.telefono_invitado,
+                                        'estado',         'activo',
+                                        'creado_en',      i.usada_en,
+                                        'con_cuenta',     false)
+                                  end,
+                   'destinatario', i.destinatario,
                    'estado_referido', r.estado,
                    'huella',      i.huella_invitado,
                    'firma',       i.firma_invitado,
@@ -346,7 +360,9 @@ begin
                  ) as fila
             from public.invitaciones i
             left join public.participantes inv on inv.id = i.usada_por_id
-            left join public.referidos r on r.invitado_id = inv.id
+            left join public.referidos r
+                   on r.invitacion_id = i.id
+                   or (r.invitacion_id is null and r.invitado_id = inv.id)
            where i.invitador_id = v_persona.id
         ) s
     ), '[]'::jsonb),

@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 
 import '../../app.dart';
 import '../../datos/controlador_referidos.dart';
+import '../../datos/modelos.dart';
 import '../../nucleo/config_campana.dart';
 import '../../nucleo/tema_onix.dart';
 import '../../utiles/codigo_referido.dart';
@@ -11,10 +12,22 @@ import '../../utiles/telefono.dart';
 import '../componentes/botones.dart';
 import 'campo_codigo.dart';
 
-/// Tarjeta blanca del hero con el flujo completo de participacion.
+/// Lo que viene a hacer la persona a la tarjeta del hero.
+enum _Modo {
+  /// Recibio un codigo: lo valida con su celular, sin crear cuenta.
+  canje,
+
+  /// Quiere invitar: crea su cuenta (o ingresa, si ya la tiene).
+  registro,
+  ingreso,
+}
+
+/// Tarjeta blanca del hero con los dos caminos de la campana.
 ///
-/// - Registro: datos de la cuenta -> codigo por SMS al celular -> panel.
-/// - Ingreso: celular y contrasena -> panel, sin SMS.
+/// - «Tengo un código»: codigo (el link lo entrega solo) + celular -> la
+///   invitacion suma. Sin cuenta ni SMS.
+/// - «Quiero invitar»: datos de la cuenta -> SMS -> panel. Quien ya tiene
+///   cuenta entra con su celular y su contrasena, sin SMS.
 class TarjetaParticipacion extends StatefulWidget {
   const TarjetaParticipacion({super.key});
 
@@ -24,27 +37,43 @@ class TarjetaParticipacion extends StatefulWidget {
 
 class _TarjetaParticipacionState extends State<TarjetaParticipacion> {
   final _formulario = GlobalKey<FormState>();
+  final _formularioCanje = GlobalKey<FormState>();
   final _nombre = TextEditingController();
   final _contrasena = TextEditingController();
   final _telefono = TextEditingController();
-  final _codigoInvitador = TextEditingController();
+  final _codigoInvitacion = TextEditingController();
+  final _telefonoCanje = TextEditingController();
   final _codigoVerificacion = TextEditingController();
 
-  bool _modoIngreso = false;
+  _Modo _modo = _Modo.registro;
   bool _verContrasena = false;
   bool _aceptaBases = false;
+  bool _aceptaBasesCanje = false;
+
+  /// El codigo vino del link (bloqueado) y no se escribio a mano.
   bool _codigoVieneDeLink = false;
+  String? _codigoAsignadoMostrado;
   PaisTelefono _pais = PaisTelefono.chile;
+  PaisTelefono _paisCanje = PaisTelefono.chile;
+
+  bool get _modoIngreso => _modo == _Modo.ingreso;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      final detectado = ProveedorCampana.accion(context).codigoInvitadorDetectado;
-      if (detectado != null && mounted) {
+      if (!mounted) return;
+      final controlador = ProveedorCampana.accion(context);
+      final detectado = controlador.codigoInvitadorDetectado;
+      if (controlador.tokenEnlaceDetectado != null) {
+        // Llego por un link de invitacion: su codigo se genera solo.
+        setState(() => _modo = _Modo.canje);
+      } else if (detectado != null) {
+        // Llego con un codigo individual en el link.
         setState(() {
-          _codigoInvitador.text = CodigoReferido.paraMostrar(detectado);
+          _codigoInvitacion.text = CodigoReferido.paraMostrar(detectado);
           _codigoVieneDeLink = true;
+          _modo = _Modo.canje;
         });
       }
     });
@@ -55,15 +84,58 @@ class _TarjetaParticipacionState extends State<TarjetaParticipacion> {
     _nombre.dispose();
     _contrasena.dispose();
     _telefono.dispose();
-    _codigoInvitador.dispose();
+    _codigoInvitacion.dispose();
+    _telefonoCanje.dispose();
     _codigoVerificacion.dispose();
     super.dispose();
+  }
+
+  void _cambiarModo(_Modo nuevo) {
+    if (nuevo == _modo) return;
+    ProveedorCampana.accion(context).limpiarError();
+    setState(() {
+      _modo = nuevo;
+      _contrasena.clear();
+    });
   }
 
   @override
   Widget build(BuildContext context) {
     final controlador = ProveedorCampana.de(context);
-    final enVerificacion = controlador.etapa == EtapaRegistro.verificacion;
+
+    // El codigo que entrego el link se escribe solo, una vez.
+    final asignado = controlador.codigoAsignado;
+    if (asignado != null && _codigoAsignadoMostrado != asignado.codigo) {
+      _codigoAsignadoMostrado = asignado.codigo;
+      _codigoInvitacion.text = asignado.codigoVisible;
+      _codigoVieneDeLink = true;
+    }
+
+    final Widget contenido;
+    if (_modo == _Modo.canje) {
+      contenido = controlador.etapaCanje == EtapaCanje.listo
+          ? _CanjeListo(
+              resultado: controlador.resultadoCanje,
+              alQuererInvitar: () => _cambiarModo(_Modo.registro),
+            )
+          : _construirPasoCanje(context, controlador);
+    } else if (controlador.etapa == EtapaRegistro.verificacion) {
+      contenido = _PasoVerificacion(
+        controladorCodigo: _codigoVerificacion,
+        alVolver: () {
+          _codigoVerificacion.clear();
+          controlador.volverADatos();
+        },
+      );
+    } else {
+      contenido = _construirPasoDatos(context, controlador);
+    }
+
+    // El selector solo se muestra mientras se llenan los datos: en medio de
+    // una verificacion por SMS no tiene sentido cambiar de camino.
+    final enDatos = _modo == _Modo.canje
+        ? controlador.etapaCanje == EtapaCanje.datos
+        : controlador.etapa == EtapaRegistro.datos;
 
     return Container(
       padding: EdgeInsets.all(
@@ -87,18 +159,169 @@ class _TarjetaParticipacionState extends State<TarjetaParticipacion> {
         duration: const Duration(milliseconds: 320),
         curve: Curves.easeOut,
         alignment: Alignment.topCenter,
-        child: enVerificacion
-            ? _PasoVerificacion(
-                controladorCodigo: _codigoVerificacion,
-                alVolver: () {
-                  _codigoVerificacion.clear();
-                  controlador.volverADatos();
-                },
-              )
-            : _construirPasoDatos(context, controlador),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (enDatos) ...[
+              _SelectorCamino(
+                canje: _modo == _Modo.canje,
+                alElegir: (canje) =>
+                    _cambiarModo(canje ? _Modo.canje : _Modo.registro),
+              ),
+              const SizedBox(height: 22),
+            ],
+            contenido,
+          ],
+        ),
       ),
     );
   }
+
+  // ---------------------------------------------------------------------
+  // Tengo un codigo
+  // ---------------------------------------------------------------------
+
+  Widget _construirPasoCanje(
+    BuildContext context,
+    ControladorReferidos controlador,
+  ) {
+    final porLink = controlador.tokenEnlaceDetectado != null;
+    final asignado = controlador.codigoAsignado;
+
+    return Form(
+      key: _formularioCanje,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            'Valida tu invitación',
+            style: Theme.of(context)
+                .textTheme
+                .headlineMedium
+                ?.copyWith(fontSize: 26),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            porLink
+                ? 'Este link te da un código exclusivo. Escribe tu celular y '
+                    'valídalo: sin cuentas, contraseñas ni SMS.'
+                : 'Escribe el código que te compartieron y tu celular. Sin '
+                    'cuentas, contraseñas ni SMS.',
+            style: Theme.of(context)
+                .textTheme
+                .bodyMedium
+                ?.copyWith(color: ColoresOnix.textoSuave),
+          ),
+          const SizedBox(height: 22),
+          if (porLink && controlador.cargandoCodigoAsignado) ...[
+            const _AvisoCargandoCodigo(),
+            const SizedBox(height: 18),
+          ] else if (porLink && controlador.errorEnlace != null) ...[
+            _AvisoEnlaceFallido(
+              texto: controlador.errorEnlace!,
+              alReintentar: controlador.reintentarCodigoAsignado,
+            ),
+            const SizedBox(height: 18),
+          ] else if (asignado != null) ...[
+            _AvisoInvitacion(
+              nombreInvitador: asignado.nombreInvitador,
+              yaUsado: asignado.usado,
+            ),
+            const SizedBox(height: 18),
+          ] else if (_codigoVieneDeLink) ...[
+            const _AvisoInvitacion(),
+            const SizedBox(height: 18),
+          ],
+          const _Etiqueta('Código de invitación'),
+          TextFormField(
+            key: const ValueKey('campo_codigo_invitacion'),
+            controller: _codigoInvitacion,
+            readOnly: _codigoVieneDeLink,
+            textCapitalization: TextCapitalization.characters,
+            autocorrect: false,
+            enableSuggestions: false,
+            decoration: InputDecoration(
+              hintText: 'ONX-XXXX-XXXX',
+              prefixIcon:
+                  const Icon(Icons.confirmation_number_rounded, size: 20),
+              suffixIcon: _codigoVieneDeLink
+                  ? const Icon(
+                      Icons.lock_rounded,
+                      size: 18,
+                      color: ColoresOnix.verde,
+                    )
+                  : null,
+            ),
+            validator: (valor) {
+              final texto = (valor ?? '').trim();
+              if (texto.isEmpty) {
+                return 'Escribe el código que te compartieron';
+              }
+              return CodigoReferido.esValido(CodigoReferido.normalizar(texto))
+                  ? null
+                  : 'Ese código no es válido. Revisa que esté completo';
+            },
+          ),
+          const SizedBox(height: 16),
+          const _Etiqueta('Tu celular'),
+          _CampoTelefono(
+            controlador: _telefonoCanje,
+            pais: _paisCanje,
+            alCambiarPais: (nuevo) => setState(() {
+              _paisCanje = nuevo;
+              _telefonoCanje.clear();
+            }),
+          ),
+          const SizedBox(height: 18),
+          _CasillaBases(
+            valor: _aceptaBasesCanje,
+            texto: 'Acepto las bases del ${ConfigCampana.nombreCampana}. Mi '
+                'número y este dispositivo quedarán asociados a este código y '
+                'no podrán validar otra invitación.',
+            alCambiar: (valor) => setState(() => _aceptaBasesCanje = valor),
+          ),
+          if (controlador.mensajeError != null) ...[
+            const SizedBox(height: 18),
+            _MensajeError(texto: controlador.mensajeError!),
+          ],
+          const SizedBox(height: 22),
+          BotonDorado(
+            texto: 'Validar código',
+            icono: Icons.verified_rounded,
+            expandido: true,
+            cargando: controlador.procesando,
+            alPresionar: controlador.cargandoCodigoAsignado
+                ? null
+                : () => _enviarCanje(controlador),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _enviarCanje(ControladorReferidos controlador) async {
+    if (controlador.procesando) return;
+    if (!(_formularioCanje.currentState?.validate() ?? false)) return;
+    if (!_aceptaBasesCanje) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Debes aceptar las bases para validar tu código.'),
+        ),
+      );
+      return;
+    }
+    await controlador.validarCodigo(
+      codigoInvitacion: _codigoInvitacion.text,
+      telefono: _telefonoCanje.text,
+      pais: _paisCanje,
+    );
+  }
+
+  // ---------------------------------------------------------------------
+  // Quiero invitar: crear cuenta o ingresar
+  // ---------------------------------------------------------------------
 
   Widget _construirPasoDatos(
     BuildContext context,
@@ -124,8 +347,9 @@ class _TarjetaParticipacionState extends State<TarjetaParticipacion> {
               _modoIngreso
                   ? 'Entra con tu celular y tu contraseña para ver tu '
                       'progreso.'
-                  : 'Crea tu cuenta en menos de un minuto. Confirmaremos tu '
-                      'celular con un código por SMS.',
+                  : 'Crea tu cuenta para generar códigos e invitar a tus '
+                      'contactos. Confirmaremos tu celular con un código por '
+                      'SMS.',
               style: Theme.of(context)
                   .textTheme
                   .bodyMedium
@@ -133,13 +357,8 @@ class _TarjetaParticipacionState extends State<TarjetaParticipacion> {
             ),
             const SizedBox(height: 24),
 
-            if (_codigoVieneDeLink && !_modoIngreso) ...[
-              const _AvisoInvitacion(),
-              const SizedBox(height: 18),
-            ],
-
             if (!_modoIngreso) ...[
-              _Etiqueta('Tu nombre'),
+              const _Etiqueta('Tu nombre'),
               TextFormField(
                 controller: _nombre,
                 textCapitalization: TextCapitalization.words,
@@ -153,32 +372,18 @@ class _TarjetaParticipacionState extends State<TarjetaParticipacion> {
               const SizedBox(height: 16),
             ],
 
-            _Etiqueta('Tu celular'),
-            TextFormField(
-              key: ValueKey(_pais),
-              controller: _telefono,
-              keyboardType: TextInputType.phone,
-              inputFormatters: [FormateadorTelefono(pais: _pais)],
-              autofillHints: const [AutofillHints.telephoneNumber],
-              decoration: InputDecoration(
-                hintText: _pais.ejemplo,
-                prefixIcon: _SelectorPais(
-                  valor: _pais,
-                  alCambiar: (nuevo) => setState(() {
-                    _pais = nuevo;
-                    _telefono.clear();
-                  }),
-                ),
-                prefixIconConstraints: const BoxConstraints(minWidth: 108),
-              ),
-              validator: (valor) =>
-                  UtilesTelefono.esMovilValido(valor ?? '', _pais)
-                      ? null
-                      : _pais.mensajeFormatoInvalido,
+            const _Etiqueta('Tu celular'),
+            _CampoTelefono(
+              controlador: _telefono,
+              pais: _pais,
+              alCambiarPais: (nuevo) => setState(() {
+                _pais = nuevo;
+                _telefono.clear();
+              }),
             ),
             const SizedBox(height: 16),
 
-            _Etiqueta('Contraseña'),
+            const _Etiqueta('Contraseña'),
             TextFormField(
               controller: _contrasena,
               obscureText: !_verContrasena,
@@ -214,35 +419,11 @@ class _TarjetaParticipacionState extends State<TarjetaParticipacion> {
             ),
 
             if (!_modoIngreso) ...[
-              const SizedBox(height: 16),
-              _Etiqueta('Código de invitación (opcional)'),
-              TextFormField(
-                controller: _codigoInvitador,
-                readOnly: _codigoVieneDeLink,
-                textCapitalization: TextCapitalization.characters,
-                decoration: InputDecoration(
-                  hintText: 'ONX-XXXX-XXXX',
-                  suffixIcon: _codigoVieneDeLink
-                      ? const Icon(
-                          Icons.lock_rounded,
-                          size: 18,
-                          color: ColoresOnix.verde,
-                        )
-                      : null,
-                ),
-                validator: (valor) {
-                  final texto = (valor ?? '').trim();
-                  if (texto.isEmpty) return null;
-                  return CodigoReferido.esValido(
-                    CodigoReferido.normalizar(texto),
-                  )
-                      ? null
-                      : 'Ese código no es válido';
-                },
-              ),
               const SizedBox(height: 18),
               _CasillaBases(
                 valor: _aceptaBases,
+                texto: 'Acepto las bases del ${ConfigCampana.nombreCampana} '
+                    'y que me envíen un SMS para verificar mi número.',
                 alCambiar: (valor) => setState(() => _aceptaBases = valor),
               ),
             ],
@@ -266,12 +447,8 @@ class _TarjetaParticipacionState extends State<TarjetaParticipacion> {
             Center(
               child: TextButton(
                 onPressed: () {
-                  controlador.limpiarError();
                   _formulario.currentState?.reset();
-                  setState(() {
-                    _modoIngreso = !_modoIngreso;
-                    _contrasena.clear();
-                  });
+                  _cambiarModo(_modoIngreso ? _Modo.registro : _Modo.ingreso);
                 },
                 child: Text(
                   _modoIngreso
@@ -318,12 +495,141 @@ class _TarjetaParticipacionState extends State<TarjetaParticipacion> {
       contrasena: _contrasena.text,
       telefono: _telefono.text,
       pais: _pais,
-      codigoInvitador: _codigoInvitador.text,
     );
   }
 }
 
-/// Paso 2: la persona escribe el codigo que le llego al celular.
+/// Dos pestañas: validar un codigo recibido o crear cuenta para invitar.
+class _SelectorCamino extends StatelessWidget {
+  const _SelectorCamino({required this.canje, required this.alElegir});
+
+  final bool canje;
+  final ValueChanged<bool> alElegir;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(4),
+      decoration: BoxDecoration(
+        color: ColoresOnix.fondo,
+        borderRadius: BorderRadius.circular(MedidasOnix.radioMedio),
+        border: Border.all(color: ColoresOnix.borde),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: _PestanaCamino(
+              texto: 'Tengo un código',
+              icono: Icons.confirmation_number_rounded,
+              activa: canje,
+              alTocar: () => alElegir(true),
+            ),
+          ),
+          const SizedBox(width: 4),
+          Expanded(
+            child: _PestanaCamino(
+              texto: 'Quiero invitar',
+              icono: Icons.group_add_rounded,
+              activa: !canje,
+              alTocar: () => alElegir(false),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _PestanaCamino extends StatelessWidget {
+  const _PestanaCamino({
+    required this.texto,
+    required this.icono,
+    required this.activa,
+    required this.alTocar,
+  });
+
+  final String texto;
+  final IconData icono;
+  final bool activa;
+  final VoidCallback alTocar;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = activa ? ColoresOnix.amarilloOnix : ColoresOnix.textoSuave;
+    return Semantics(
+      button: true,
+      selected: activa,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: alTocar,
+          borderRadius: BorderRadius.circular(MedidasOnix.radioChico),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 200),
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 11),
+            decoration: BoxDecoration(
+              color: activa ? ColoresOnix.azulOnix : Colors.transparent,
+              borderRadius: BorderRadius.circular(MedidasOnix.radioChico),
+            ),
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(icono, size: 17, color: color),
+                  const SizedBox(width: 7),
+                  Text(
+                    texto,
+                    maxLines: 1,
+                    style: TextStyle(
+                      color: activa ? ColoresOnix.blanco : ColoresOnix.texto,
+                      fontSize: 13.5,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Celular con selector de pais, igual en los dos caminos.
+class _CampoTelefono extends StatelessWidget {
+  const _CampoTelefono({
+    required this.controlador,
+    required this.pais,
+    required this.alCambiarPais,
+  });
+
+  final TextEditingController controlador;
+  final PaisTelefono pais;
+  final ValueChanged<PaisTelefono> alCambiarPais;
+
+  @override
+  Widget build(BuildContext context) {
+    return TextFormField(
+      key: ValueKey(pais),
+      controller: controlador,
+      keyboardType: TextInputType.phone,
+      inputFormatters: [FormateadorTelefono(pais: pais)],
+      autofillHints: const [AutofillHints.telephoneNumber],
+      decoration: InputDecoration(
+        hintText: pais.ejemplo,
+        prefixIcon: _SelectorPais(valor: pais, alCambiar: alCambiarPais),
+        prefixIconConstraints: const BoxConstraints(minWidth: 108),
+      ),
+      validator: (valor) => UtilesTelefono.esMovilValido(valor ?? '', pais)
+          ? null
+          : pais.mensajeFormatoInvalido,
+    );
+  }
+}
+
+/// Quien crea su cuenta escribe el codigo que le llego al celular.
 class _PasoVerificacion extends StatelessWidget {
   const _PasoVerificacion({
     required this.controladorCodigo,
@@ -384,9 +690,7 @@ class _PasoVerificacion extends StatelessWidget {
                   fontWeight: FontWeight.w700,
                 ),
               ),
-              const TextSpan(
-                text: '. Al confirmarlo se crea tu cuenta.',
-              ),
+              const TextSpan(text: '. Al confirmarlo se crea tu cuenta.'),
             ],
           ),
         ),
@@ -394,7 +698,7 @@ class _PasoVerificacion extends StatelessWidget {
         CampoCodigoVerificacion(
           controlador: controladorCodigo,
           habilitado: !controlador.procesando,
-          alCompletar: (codigo) => controlador.confirmarCodigo(codigo),
+          alCompletar: controlador.confirmarCodigo,
         ),
 
         if (desafio?.codigoDemo != null) ...[
@@ -419,10 +723,142 @@ class _PasoVerificacion extends StatelessWidget {
         const SizedBox(height: 12),
         Center(
           child: TextButton(
-            onPressed: controlador.procesando
-                ? null
-                : () => controlador.reenviarCodigo(),
+            onPressed:
+                controlador.procesando ? null : controlador.reenviarCodigo,
             child: const Text('Reenviar código'),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// La invitacion ya sumo: confirmacion y la invitacion a participar.
+class _CanjeListo extends StatelessWidget {
+  const _CanjeListo({required this.resultado, required this.alQuererInvitar});
+
+  final ResultadoCanje? resultado;
+  final VoidCallback alQuererInvitar;
+
+  @override
+  Widget build(BuildContext context) {
+    final resultado = this.resultado;
+    final quien = resultado?.nombreInvitador;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Center(
+          child: Container(
+            width: 68,
+            height: 68,
+            decoration: BoxDecoration(
+              color: ColoresOnix.verde.withValues(alpha: 0.12),
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(
+              Icons.verified_rounded,
+              color: ColoresOnix.verde,
+              size: 38,
+            ),
+          ),
+        ),
+        const SizedBox(height: 16),
+        Text(
+          '¡Invitación validada!',
+          textAlign: TextAlign.center,
+          style: Theme.of(context)
+              .textTheme
+              .headlineMedium
+              ?.copyWith(fontSize: 25),
+        ),
+        const SizedBox(height: 10),
+        Text(
+          quien == null || quien.isEmpty
+              ? 'Tu código ya sumó un ticket a quien te invitó.'
+              : 'Tu código ya sumó un ticket a $quien.',
+          textAlign: TextAlign.center,
+          style: Theme.of(context)
+              .textTheme
+              .bodyLarge
+              ?.copyWith(color: ColoresOnix.texto, fontWeight: FontWeight.w600),
+        ),
+        if (resultado != null) ...[
+          const SizedBox(height: 18),
+          Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: ColoresOnix.fondo,
+              borderRadius: BorderRadius.circular(MedidasOnix.radioChico),
+              border: Border.all(color: ColoresOnix.borde),
+            ),
+            child: Column(
+              children: [
+                _FilaDato(etiqueta: 'Código', valor: resultado.codigoVisible),
+                const SizedBox(height: 8),
+                _FilaDato(
+                  etiqueta: 'Celular',
+                  valor: UtilesTelefono.formatoLegible(resultado.telefonoE164),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 10),
+          const Text(
+            'Tu número y este dispositivo quedaron asociados a este código: '
+            'no pueden validar otra invitación.',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: ColoresOnix.textoSuave,
+              fontSize: 12.5,
+              height: 1.45,
+            ),
+          ),
+        ],
+        const SizedBox(height: 22),
+        BotonDorado(
+          texto: 'Yo también quiero invitar',
+          icono: Icons.group_add_rounded,
+          expandido: true,
+          alPresionar: alQuererInvitar,
+        ),
+      ],
+    );
+  }
+}
+
+class _FilaDato extends StatelessWidget {
+  const _FilaDato({required this.etiqueta, required this.valor});
+
+  final String etiqueta;
+  final String valor;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Text(
+          etiqueta,
+          style: const TextStyle(
+            color: ColoresOnix.textoSuave,
+            fontSize: 13,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Text(
+            valor,
+            textAlign: TextAlign.end,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              color: ColoresOnix.texto,
+              fontSize: 13.5,
+              fontWeight: FontWeight.w800,
+              fontFeatures: [FontFeature.tabularFigures()],
+            ),
           ),
         ),
       ],
@@ -506,27 +942,113 @@ class _Etiqueta extends StatelessWidget {
 
 /// Banner que confirma que la persona llegó por el link de alguien.
 class _AvisoInvitacion extends StatelessWidget {
-  const _AvisoInvitacion();
+  const _AvisoInvitacion({this.nombreInvitador, this.yaUsado = false});
+
+  final String? nombreInvitador;
+  final bool yaUsado;
+
+  @override
+  Widget build(BuildContext context) {
+    final quien = (nombreInvitador ?? '').isEmpty
+        ? 'Te invitaron'
+        : '$nombreInvitador te invitó';
+    final texto = yaUsado
+        ? 'Este código ya se validó desde este celular. Cada persona puede '
+            'aceptar una sola invitación.'
+        : '$quien. Este código es solo para ti y quedó reservado para este '
+            'celular: al validarlo, tu número también queda anclado a él.';
+
+    return _Aviso(
+      icono: yaUsado ? Icons.info_rounded : Icons.card_giftcard_rounded,
+      color: yaUsado ? ColoresOnix.ambar : ColoresOnix.verde,
+      texto: texto,
+    );
+  }
+}
+
+/// Mientras el link genera el codigo de este dispositivo.
+class _AvisoCargandoCodigo extends StatelessWidget {
+  const _AvisoCargandoCodigo();
+
+  @override
+  Widget build(BuildContext context) {
+    return const _Aviso(
+      icono: Icons.hourglass_top_rounded,
+      color: ColoresOnix.azulElectrico,
+      texto: 'Preparando tu código exclusivo…',
+      cargando: true,
+    );
+  }
+}
+
+/// El link no pudo entregar un codigo: se explica y se puede reintentar o
+/// escribir un codigo a mano.
+class _AvisoEnlaceFallido extends StatelessWidget {
+  const _AvisoEnlaceFallido({required this.texto, required this.alReintentar});
+
+  final String texto;
+  final VoidCallback alReintentar;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _Aviso(
+          icono: Icons.error_outline_rounded,
+          color: ColoresOnix.rojo,
+          texto: texto,
+        ),
+        Align(
+          alignment: Alignment.centerRight,
+          child: TextButton.icon(
+            onPressed: alReintentar,
+            icon: const Icon(Icons.refresh_rounded, size: 18),
+            label: const Text('Reintentar'),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _Aviso extends StatelessWidget {
+  const _Aviso({
+    required this.icono,
+    required this.color,
+    required this.texto,
+    this.cargando = false,
+  });
+
+  final IconData icono;
+  final Color color;
+  final String texto;
+  final bool cargando;
 
   @override
   Widget build(BuildContext context) {
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: ColoresOnix.verde.withValues(alpha: 0.09),
+        color: color.withValues(alpha: 0.09),
         borderRadius: BorderRadius.circular(MedidasOnix.radioChico),
-        border: Border.all(color: ColoresOnix.verde.withValues(alpha: 0.3)),
+        border: Border.all(color: color.withValues(alpha: 0.3)),
       ),
-      child: const Row(
+      child: Row(
         children: [
-          Icon(Icons.card_giftcard_rounded,
-              size: 19, color: ColoresOnix.verde),
-          SizedBox(width: 11),
+          if (cargando)
+            SizedBox(
+              width: 18,
+              height: 18,
+              child: CircularProgressIndicator(strokeWidth: 2.2, color: color),
+            )
+          else
+            Icon(icono, size: 19, color: color),
+          const SizedBox(width: 11),
           Expanded(
             child: Text(
-              'Llegaste con una invitación. Regístrate desde tu propio '
-              'celular: este dispositivo quedará anclado a ese código.',
-              style: TextStyle(
+              texto,
+              style: const TextStyle(
                 color: ColoresOnix.texto,
                 fontSize: 13,
                 height: 1.45,
@@ -629,9 +1151,14 @@ class _MensajeError extends StatelessWidget {
 }
 
 class _CasillaBases extends StatelessWidget {
-  const _CasillaBases({required this.valor, required this.alCambiar});
+  const _CasillaBases({
+    required this.valor,
+    required this.texto,
+    required this.alCambiar,
+  });
 
   final bool valor;
+  final String texto;
   final ValueChanged<bool> alCambiar;
 
   @override
@@ -657,11 +1184,10 @@ class _CasillaBases extends StatelessWidget {
               ),
             ),
             const SizedBox(width: 12),
-            const Expanded(
+            Expanded(
               child: Text(
-                'Acepto las bases del ${ConfigCampana.nombreCampana} y que '
-                'me envíen un SMS para verificar mi número.',
-                style: TextStyle(
+                texto,
+                style: const TextStyle(
                   color: ColoresOnix.textoSuave,
                   fontSize: 12.5,
                   height: 1.45,

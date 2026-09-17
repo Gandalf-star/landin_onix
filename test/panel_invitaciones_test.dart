@@ -9,8 +9,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'reglas_antifraude_test.dart' show registrar;
 
-/// Pruebas del panel: generar codigos de invitacion de un solo uso y
-/// mostrarlos listos para compartir por WhatsApp.
+/// Pruebas del panel: el link para invitar a muchos contactos por WhatsApp
+/// y los codigos individuales.
 void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));
 
@@ -54,39 +54,51 @@ void main() {
     return controlador;
   }
 
-  testWidgets('sin códigos generados invita a crear el primero', (
+  testWidgets('el panel muestra el link para compartir con muchos contactos', (
     tester,
   ) async {
-    await montarPanel(tester);
+    final controlador = await montarPanel(tester);
 
-    expect(
-      find.textContaining('Genera un código para invitar'),
-      findsOneWidget,
+    expect(find.text('INVITA A TUS CONTACTOS'), findsOneWidget);
+    expect(find.text('Compartir link por WhatsApp'), findsOneWidget);
+    expect(find.text('¿A quién vas a invitar?'), findsNothing);
+
+    final enlace = controlador.enlace!;
+    expect(find.textContaining('?inv=${enlace.token}'), findsOneWidget);
+    expect(find.textContaining('0 de 50 códigos entregados'), findsOneWidget);
+
+    // El mensaje lleva el link, no un código: WhatsApp manda el mismo texto
+    // a todos los contactos elegidos.
+    final mensaje = controlador.mensajeDelEnlace(
+      controlador.participante!,
+      enlace,
     );
-    expect(find.text('Compartir por WhatsApp'), findsNothing);
+    expect(mensaje, contains('?inv=${enlace.token}'));
+    expect(mensaje, isNot(contains('ONX-')));
+    expect(
+      ControladorReferidos.enlaceWhatsApp(mensaje).toString(),
+      startsWith('https://wa.me/?text='),
+    );
   });
 
-  testWidgets('generar un código lo muestra listo para compartir', (
+  testWidgets('generar un código individual lo muestra listo para enviar', (
     tester,
   ) async {
     await montarPanel(tester);
+    expect(find.text('CÓDIGO PARA TU PRÓXIMO INVITADO'), findsNothing);
 
     await tester.tap(find.text('Generar código para invitar'));
     await tester.pumpAndSettle();
 
-    expect(
-      find.textContaining('CÓDIGO PARA TU PRÓXIMO INVITADO'),
-      findsOneWidget,
-    );
-    expect(find.text('Compartir por WhatsApp'), findsOneWidget);
-    expect(find.text('Copiar mensaje de invitación'), findsOneWidget);
+    expect(find.text('CÓDIGO PARA TU PRÓXIMO INVITADO'), findsOneWidget);
+    expect(find.text('Enviar código'), findsOneWidget);
     expect(
       find.textContaining('Tus códigos de invitación (1)'),
       findsOneWidget,
     );
   });
 
-  testWidgets('cada código generado es distinto y queda en la lista', (
+  testWidgets('cada código individual es distinto y queda en la lista', (
     tester,
   ) async {
     final controlador = await montarPanel(tester);

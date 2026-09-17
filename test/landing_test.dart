@@ -12,6 +12,8 @@ import 'package:onix_referidos/src/ui/registro/tarjeta_participacion.dart';
 import 'package:onix_referidos/src/utiles/telefono.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'reglas_antifraude_test.dart' show registrar;
+
 /// Pruebas de humo: comprueban que la landing monta completa y que el
 /// formulario de participación reacciona, sin depender de ningún backend.
 void main() {
@@ -97,8 +99,9 @@ void main() {
       findsOneWidget,
     );
     expect(find.text('Participa gratis'), findsOneWidget);
-    expect(find.text('Quiénes van adelante'), findsOneWidget);
-    expect(find.text('Tres cajas cerradas. Una es tuya.'), findsOneWidget);
+    expect(find.text('Cómo funciona'), findsOneWidget);
+    expect(find.text('Premios'), findsOneWidget);
+    expect(find.text('Onix Drive'), findsWidgets);
     expect(tester.takeException(), isNull);
   });
 
@@ -218,6 +221,128 @@ void main() {
     // Deja que termine la carga inicial del repositorio en memoria: si no,
     // el test acaba con temporizadores pendientes.
     await tester.pump(const Duration(seconds: 1));
+  });
+
+  testWidgets('abrir el link entrega un código y se valida sin SMS', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(560, 1400);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+
+    // Camila crea su cuenta y comparte su link desde su celular.
+    final repositorio = RepositorioEnMemoria()
+      ..huellaDispositivo = 'celular_de_camila';
+    late final String token;
+    late final String idCamila;
+    await tester.runAsync(() async {
+      final camila = await registrar(
+        repositorio,
+        nombre: 'Camila Torres',
+        telefono: '9 6483 1207',
+      );
+      idCamila = camila.id;
+      token = (await repositorio.miEnlace(camila.id)).token;
+      await repositorio.cerrarSesion();
+    });
+
+    // Matías abre el link en su propio celular (`?inv=...`).
+    repositorio.huellaDispositivo = 'celular_de_matias';
+    final controlador = ControladorReferidos(repositorio)
+      ..tokenEnlaceDetectado = token;
+    addTearDown(controlador.dispose);
+    await tester.runAsync(controlador.inicializar);
+    final codigo = controlador.codigoAsignado!.codigoVisible;
+
+    await tester.pumpWidget(
+      ProveedorCampana(
+        controlador: controlador,
+        child: MaterialApp(
+          theme: construirTemaOnix(),
+          home: const Scaffold(
+            body: SingleChildScrollView(
+              padding: EdgeInsets.all(20),
+              child: TarjetaParticipacion(),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // La tarjeta abre en «Tengo un código» con su código ya escrito.
+    expect(find.text('Valida tu invitación'), findsOneWidget);
+    expect(find.textContaining('Camila te invitó'), findsOneWidget);
+    expect(find.text(codigo), findsOneWidget);
+    expect(find.text('Tu nombre'), findsNothing);
+    expect(find.text('Contraseña'), findsNothing);
+
+    await tester.enterText(
+      find.widgetWithText(TextFormField, '9 1234 5678'),
+      '964831208',
+    );
+    await tocar(tester, find.byType(Checkbox));
+    await tester.ensureVisible(find.text('Validar código'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Validar código'));
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 600)),
+    );
+    await tester.pumpAndSettle();
+
+    // Sin paso de SMS: la invitación queda validada de inmediato.
+    expect(find.text('Confirma tu número'), findsNothing);
+    expect(find.text('¡Invitación validada!'), findsOneWidget);
+    expect(find.text('Tu código ya sumó un ticket a Camila.'), findsOneWidget);
+
+    late final int tickets;
+    await tester.runAsync(() async {
+      tickets = (await repositorio.refrescarParticipante(idCamila)).tickets;
+    });
+    expect(tickets, 1);
+  });
+
+  testWidgets('quien invita no puede usar su propio link', (tester) async {
+    tester.view.physicalSize = const Size(560, 1400);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+
+    final repositorio = RepositorioEnMemoria()
+      ..huellaDispositivo = 'celular_de_camila';
+    late final String token;
+    await tester.runAsync(() async {
+      final camila = await registrar(
+        repositorio,
+        nombre: 'Camila Torres',
+        telefono: '9 6483 1207',
+      );
+      token = (await repositorio.miEnlace(camila.id)).token;
+      await repositorio.cerrarSesion();
+    });
+
+    final controlador = ControladorReferidos(repositorio)
+      ..tokenEnlaceDetectado = token;
+    addTearDown(controlador.dispose);
+    await tester.runAsync(controlador.inicializar);
+    await tester.pumpWidget(
+      ProveedorCampana(
+        controlador: controlador,
+        child: MaterialApp(
+          theme: construirTemaOnix(),
+          home: const Scaffold(
+            body: SingleChildScrollView(
+              padding: EdgeInsets.all(20),
+              child: TarjetaParticipacion(),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(controlador.codigoAsignado, isNull);
+    expect(find.textContaining('Este es tu propio link'), findsOneWidget);
+    expect(find.text('Reintentar'), findsOneWidget);
   });
 
   testWidgets('el ingreso pide celular y contraseña, no el nombre', (

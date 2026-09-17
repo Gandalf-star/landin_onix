@@ -27,6 +27,26 @@ abstract final class CodigoReferido {
     return '$cuerpo${_caracterVerificador(cuerpo)}';
   }
 
+  /// Largo del token de un link de invitacion (`?inv=XXXXXXXXXX`).
+  static const largoToken = 10;
+
+  /// Token aleatorio para un link de invitacion. Lo genera la base; aqui se
+  /// usa solo en el repositorio de demostracion.
+  static String generarToken() => List.generate(
+        largoToken,
+        (_) => alfabeto[_aleatorio.nextInt(alfabeto.length)],
+      ).join();
+
+  /// Token de link valido: largo y alfabeto correctos.
+  static String? normalizarToken(String entrada) {
+    final valor = entrada.toUpperCase().replaceAll(RegExp(r'[^A-Z0-9]'), '');
+    if (valor.length != largoToken) return null;
+    for (final caracter in valor.split('')) {
+      if (!alfabeto.contains(caracter)) return null;
+    }
+    return valor;
+  }
+
   /// Normaliza lo que el usuario pega: acepta `onx-7k4q-2p9m`, `ONX7K4Q2P9M`,
   /// un link completo o el codigo pelado.
   static String normalizar(String entrada) {

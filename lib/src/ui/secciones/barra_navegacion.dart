@@ -4,26 +4,20 @@ import '../../app.dart';
 import '../../nucleo/config_campana.dart';
 import '../../nucleo/tema_onix.dart';
 import '../componentes/logo_onix.dart';
+import '../navegacion.dart';
 
-/// Barra superior fija. Arranca transparente sobre el hero y se vuelve solida
-/// apenas la persona empieza a bajar.
+/// Barra superior fija. Arranca transparente sobre el encabezado oscuro y se
+/// vuelve solida apenas la persona empieza a bajar. Cada enlace abre su
+/// propia pantalla; la actual queda resaltada.
 class BarraNavegacion extends StatefulWidget {
   const BarraNavegacion({
     super.key,
     required this.desplazador,
-    required this.alIrAInicio,
-    required this.alIrAComoFunciona,
-    required this.alIrAPremios,
-    required this.alIrARanking,
-    required this.alIrAPreguntas,
+    required this.paginaActual,
   });
 
   final ScrollController desplazador;
-  final VoidCallback alIrAInicio;
-  final VoidCallback alIrAComoFunciona;
-  final VoidCallback alIrAPremios;
-  final VoidCallback alIrARanking;
-  final VoidCallback alIrAPreguntas;
+  final PaginaOnix paginaActual;
 
   @override
   State<BarraNavegacion> createState() => _BarraNavegacionState();
@@ -57,12 +51,7 @@ class _BarraNavegacionState extends State<BarraNavegacion> {
         PuntosQuiebre.navegacionCompleta;
     final controlador = ProveedorCampana.de(context);
 
-    final enlaces = <(String, VoidCallback)>[
-      ('Cómo funciona', widget.alIrAComoFunciona),
-      ('Premios', widget.alIrAPremios),
-      ('Ranking', widget.alIrARanking),
-      ('Preguntas', widget.alIrAPreguntas),
-    ];
+    void irA(PaginaOnix pagina) => NavegacionOnix.ir(context, pagina);
 
     return AnimatedContainer(
       duration: const Duration(milliseconds: 260),
@@ -104,7 +93,7 @@ class _BarraNavegacionState extends State<BarraNavegacion> {
               MouseRegion(
                 cursor: SystemMouseCursors.click,
                 child: GestureDetector(
-                  onTap: widget.alIrAInicio,
+                  onTap: () => irA(PaginaOnix.inicio),
                   child: LogoOnix(
                     alto: _compacta ? 32 : 38,
                     sobreFondoOscuro: true,
@@ -113,15 +102,25 @@ class _BarraNavegacionState extends State<BarraNavegacion> {
               ),
               const Spacer(),
               if (conEnlaces) ...[
-                for (final (texto, accion) in enlaces)
-                  _EnlaceNavegacion(texto: texto, alPresionar: accion),
+                for (final pagina in PaginaOnix.enBarra)
+                  _EnlaceNavegacion(
+                    texto: pagina.titulo,
+                    activo: pagina == widget.paginaActual,
+                    alPresionar: () => irA(pagina),
+                  ),
                 const SizedBox(width: 14),
                 _BotonParticipar(
                   texto: controlador.haySesion ? 'Mi panel' : 'Participar',
-                  alPresionar: widget.alIrAInicio,
+                  alPresionar: () => irA(PaginaOnix.inicio),
                 ),
               ] else
-                _MenuMovil(enlaces: enlaces, alParticipar: widget.alIrAInicio),
+                _MenuMovil(
+                  paginaActual: widget.paginaActual,
+                  alElegir: irA,
+                  textoParticipar: controlador.haySesion
+                      ? 'Ir a mi panel'
+                      : 'Participar en ${ConfigCampana.nombreCampana}',
+                ),
             ],
           ),
         ),
@@ -131,9 +130,14 @@ class _BarraNavegacionState extends State<BarraNavegacion> {
 }
 
 class _EnlaceNavegacion extends StatefulWidget {
-  const _EnlaceNavegacion({required this.texto, required this.alPresionar});
+  const _EnlaceNavegacion({
+    required this.texto,
+    required this.activo,
+    required this.alPresionar,
+  });
 
   final String texto;
+  final bool activo;
   final VoidCallback alPresionar;
 
   @override
@@ -145,6 +149,7 @@ class _EnlaceNavegacionState extends State<_EnlaceNavegacion> {
 
   @override
   Widget build(BuildContext context) {
+    final resaltado = _encima || widget.activo;
     return MouseRegion(
       cursor: SystemMouseCursors.click,
       onEnter: (_) => setState(() => _encima = true),
@@ -159,18 +164,18 @@ class _EnlaceNavegacionState extends State<_EnlaceNavegacion> {
               Text(
                 widget.texto,
                 style: TextStyle(
-                  color: _encima
+                  color: resaltado
                       ? ColoresOnix.amarilloOnix
                       : ColoresOnix.sobreAzul,
                   fontSize: 14.5,
-                  fontWeight: FontWeight.w600,
+                  fontWeight: widget.activo ? FontWeight.w800 : FontWeight.w600,
                 ),
               ),
               const SizedBox(height: 4),
               AnimatedContainer(
                 duration: const Duration(milliseconds: 200),
                 height: 2,
-                width: _encima ? 22 : 0,
+                width: resaltado ? 22 : 0,
                 decoration: BoxDecoration(
                   color: ColoresOnix.amarilloOnix,
                   borderRadius: BorderRadius.circular(2),
@@ -229,10 +234,15 @@ class _BotonParticipar extends StatelessWidget {
 }
 
 class _MenuMovil extends StatelessWidget {
-  const _MenuMovil({required this.enlaces, required this.alParticipar});
+  const _MenuMovil({
+    required this.paginaActual,
+    required this.alElegir,
+    required this.textoParticipar,
+  });
 
-  final List<(String, VoidCallback)> enlaces;
-  final VoidCallback alParticipar;
+  final PaginaOnix paginaActual;
+  final ValueChanged<PaginaOnix> alElegir;
+  final String textoParticipar;
 
   @override
   Widget build(BuildContext context) {
@@ -268,32 +278,41 @@ class _MenuMovil extends StatelessWidget {
                     ),
                   ),
                 ),
-                for (final (texto, accion) in enlaces)
+                for (final pagina in PaginaOnix.values)
                   ListTile(
                     title: Text(
-                      texto,
-                      style: const TextStyle(
-                        color: ColoresOnix.sobreAzul,
+                      pagina.titulo,
+                      style: TextStyle(
+                        color: pagina == paginaActual
+                            ? ColoresOnix.amarilloOnix
+                            : ColoresOnix.sobreAzul,
                         fontSize: 16,
-                        fontWeight: FontWeight.w600,
+                        fontWeight: pagina == paginaActual
+                            ? FontWeight.w800
+                            : FontWeight.w600,
                       ),
                     ),
-                    trailing: const Icon(
-                      Icons.chevron_right_rounded,
-                      color: ColoresOnix.sobreAzulSuave,
+                    trailing: Icon(
+                      pagina == paginaActual
+                          ? Icons.circle
+                          : Icons.chevron_right_rounded,
+                      size: pagina == paginaActual ? 9 : 24,
+                      color: pagina == paginaActual
+                          ? ColoresOnix.amarilloOnix
+                          : ColoresOnix.sobreAzulSuave,
                     ),
                     onTap: () {
                       Navigator.of(contexto).pop();
-                      accion();
+                      alElegir(pagina);
                     },
                   ),
                 const SizedBox(height: 14),
                 _BotonParticipar(
                   anchoCompleto: true,
-                  texto: 'Participar en ${ConfigCampana.nombreCampana}',
+                  texto: textoParticipar,
                   alPresionar: () {
                     Navigator.of(contexto).pop();
-                    alParticipar();
+                    alElegir(PaginaOnix.inicio);
                   },
                 ),
               ],

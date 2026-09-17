@@ -1,11 +1,13 @@
 """Une los archivos SQL de la campana en uno solo, listo para pegar.
 
-El esquema se mantiene partido en cuatro porque son cosas distintas:
+El esquema se mantiene partido en cinco porque son cosas distintas:
 
 - `esquema_supabase.sql`: tablas de la campana (participantes,
   invitaciones con su dispositivo anclado, referidos).
-- `esquema_supabase_cuentas.sql`: cuentas con usuario y contrasena, sesiones
-  y registro verificado con Twilio.
+- `esquema_supabase_cuentas.sql`: cuentas con celular y contrasena, sesiones
+  y registro verificado con Twilio (solo para quien invita).
+- `esquema_supabase_invitados.sql`: links de invitacion y canje del codigo sin
+  cuenta ni SMS, anclado al dispositivo y al telefono.
 - `esquema_supabase_premios.sql`: el premio de las tres cajas.
 - `esquema_supabase_admin.sql`: cuentas y funciones del panel admin.
 
@@ -29,10 +31,12 @@ PARTES = [
     ('esquema_supabase.sql', None),
     ('esquema_supabase_cuentas.sql',
      'SEGUNDA PARTE · CUENTAS, SESIONES Y VERIFICACIÓN CON TWILIO'),
+    ('esquema_supabase_invitados.sql',
+     'TERCERA PARTE · LINKS DE INVITACIÓN Y CANJE SIN CUENTA'),
     ('esquema_supabase_premios.sql',
-     'TERCERA PARTE · PREMIO DE LAS TRES CAJAS'),
+     'CUARTA PARTE · PREMIO DE LAS TRES CAJAS'),
     ('esquema_supabase_admin.sql',
-     'CUARTA PARTE · PANEL ADMIN'),
+     'QUINTA PARTE · PANEL ADMIN'),
 ]
 ARCHIVO_SALIDA = os.path.join(CARPETA, 'esquema_supabase_completo.sql')
 
@@ -42,8 +46,8 @@ CABECERA = """-- ===============================================================
 --  Copia este archivo entero y pégalo en el editor SQL del panel de
 --  Supabase (SQL Editor → New query → Run). Es lo único que hay que
 --  ejecutar en la base: contiene el esquema de la campaña, las cuentas
---  verificadas con Twilio, el premio de las tres cajas y el panel admin,
---  en el orden correcto.
+--  verificadas con Twilio, el canje de invitaciones sin cuenta, el premio
+--  de las tres cajas y el panel admin, en el orden correcto.
 --
 --  Además hay que desplegar la Edge Function `verificar-telefono` y
 --  cargarle los secretos de Twilio: ver la sección «Twilio» del README.
@@ -55,9 +59,9 @@ CABECERA = """-- ===============================================================
 --  ARCHIVO GENERADO · no editar a mano
 --  -----------------------------------
 --  Sale de unir, en orden, docs/esquema_supabase.sql,
---  docs/esquema_supabase_cuentas.sql, docs/esquema_supabase_premios.sql y
---  docs/esquema_supabase_admin.sql. Para regenerarlo después de tocar
---  cualquiera de ellos:
+--  docs/esquema_supabase_cuentas.sql, docs/esquema_supabase_invitados.sql,
+--  docs/esquema_supabase_premios.sql y docs/esquema_supabase_admin.sql.
+--  Para regenerarlo después de tocar cualquiera de ellos:
 --
 --    python docs/generar_esquema_completo.py
 --

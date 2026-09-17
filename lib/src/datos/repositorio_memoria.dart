@@ -27,7 +27,6 @@ class _FilaParticipante {
     required this.creadoEn,
     required this.telefonoVerificado,
     this.contrasena,
-    this.codigoInvitador,
     this.huella,
   });
 
@@ -38,10 +37,6 @@ class _FilaParticipante {
   /// En memoria se guarda tal cual: estos datos viven solo en la pestaña del
   /// navegador. En Supabase la contrasena se guarda cifrada con bcrypt.
   final String? contrasena;
-
-  /// Codigo de invitacion (de un solo uso) canjeado al registrarse.
-  /// Inmutable a proposito: se escribe una sola vez, al crear la fila.
-  final String? codigoInvitador;
 
   /// Dispositivo desde el que se registro.
   final String? huella;
@@ -70,10 +65,30 @@ class _FilaInvitacion {
   final DateTime creadoEn;
   final DateTime expiraEn;
   DateTime? usadaEn;
-  String? nombreInvitado;
 
-  /// Dispositivo del invitado, anclado a este codigo al canjearlo.
+  /// Link que entrego este codigo y dispositivo al que se entrego.
+  String? idEnlace;
+  String? huellaAsignada;
+
+  /// Dispositivo y telefono del invitado, anclados a este codigo al
+  /// validarlo.
   String? huellaInvitado;
+  String? telefonoInvitado;
+}
+
+/// Link de invitacion: cada dispositivo que lo abre recibe su propio codigo.
+class _FilaEnlace {
+  _FilaEnlace({
+    required this.id,
+    required this.idInvitador,
+    required this.token,
+    required this.expiraEn,
+  });
+
+  final String id;
+  final String idInvitador;
+  final String token;
+  final DateTime expiraEn;
 }
 
 class _FilaReferido {
@@ -103,20 +118,20 @@ class _Desafio {
     required this.telefonoE164,
     required this.codigo,
     required this.expiraEn,
+    required this.huella,
     required this.nombre,
     required this.contrasena,
-    required this.huella,
-    this.codigoInvitador,
   });
 
   final String id;
   final String telefonoE164;
   String codigo;
   DateTime expiraEn;
+  final String huella;
+
   final String nombre;
   final String contrasena;
-  final String huella;
-  final String? codigoInvitador;
+
   int intentos = 0;
   DateTime ultimoEnvio = DateTime.now();
 }
@@ -156,6 +171,8 @@ class RepositorioEnMemoria
   static const _duracionDesafio = Duration(minutes: 10);
   static const _maxFallosIngreso = 5;
   static const _ventanaFallosIngreso = Duration(minutes: 15);
+  static const _maxCodigosInvalidos = 8;
+  static const _maxCodigosPorEnlace = 50;
 
   /// Dispositivo desde el que se hacen las operaciones.
   ///
@@ -172,6 +189,11 @@ class RepositorioEnMemoria
   final _fallosIngreso = <String, List<DateTime>>{};
   final _referidos = <_FilaReferido>[];
   final _desafios = <String, _Desafio>{};
+  final _enlaces = <String, _FilaEnlace>{};
+
+  /// Codigos inexistentes, usados o vencidos probados desde cada
+  /// dispositivo: frena a quien prueba codigos al azar.
+  final _codigosInvalidos = <String, List<DateTime>>{};
   final _invitaciones = <String, _FilaInvitacion>{};
   final _porCodigoInvitacion = <String, String>{};
 
@@ -191,36 +213,6 @@ class RepositorioEnMemoria
       Future<void>.delayed(Duration(milliseconds: ms));
 
   // ---------------------------------------------------------------------
-  // Lecturas publicas
-  // ---------------------------------------------------------------------
-
-  @override
-  Future<List<FilaRanking>> obtenerRanking({
-    int limite = 10,
-    String? idParticipante,
-  }) async {
-    await _latencia(200);
-    final ordenados = _participantes.values.toList()
-      ..sort((a, b) {
-        final porValidos = _contarValidos(b.id).compareTo(_contarValidos(a.id));
-        if (porValidos != 0) return porValidos;
-        return a.creadoEn.compareTo(b.creadoEn);
-      });
-
-    return [
-      for (var i = 0; i < ordenados.length && i < limite; i++)
-        FilaRanking(
-          posicion: i + 1,
-          nombreVisible: _nombreCorto(ordenados[i].nombre),
-          telefonoEnmascarado:
-              UtilesTelefono.enmascarar(ordenados[i].telefonoE164),
-          referidosValidos: _contarValidos(ordenados[i].id),
-          soyYo: ordenados[i].id == idParticipante,
-        ),
-    ];
-  }
-
-  // ---------------------------------------------------------------------
   // Invitaciones de un solo uso
   // ---------------------------------------------------------------------
 
@@ -228,9 +220,53 @@ class RepositorioEnMemoria
   Future<InvitacionEmitida> generarInvitacion(String idParticipante) async {
     await _latencia(180);
     _participanteObligatorio(idParticipante);
+    return _invitacionAModelo(_emitirInvitacion(idParticipante));
+  }
+
+  @override
+  Future<EnlaceInvitacion> miEnlace(String idParticipante) async {
+    await _latencia(160);
+    _participanteObligatorio(idParticipante);
+    final margen = DateTime.now().add(const Duration(days: 1));
+    _FilaEnlace? enlace;
+    for (final candidato in _enlaces.values) {
+      if (candidato.idInvitador == idParticipante &&
+          candidato.expiraEn.isAfter(margen) &&
+          _codigosDelEnlace(candidato.id) < _maxCodigosPorEnlace) {
+        enlace = candidato;
+      }
+    }
+    enlace ??= _crearEnlace(idParticipante);
+    return EnlaceInvitacion(
+      token: enlace.token,
+      expiraEn: enlace.expiraEn,
+      codigosEntregados: _codigosDelEnlace(enlace.id),
+      maxCodigos: _maxCodigosPorEnlace,
+    );
+  }
+
+  _FilaEnlace _crearEnlace(String idInvitador) {
+    var token = CodigoReferido.generarToken();
+    while (_enlaces.containsKey(token)) {
+      token = CodigoReferido.generarToken();
+    }
+    final enlace = _FilaEnlace(
+      id: _nuevoId('enl'),
+      idInvitador: idInvitador,
+      token: token,
+      expiraEn: DateTime.now().add(const Duration(days: 7)),
+    );
+    _enlaces[token] = enlace;
+    return enlace;
+  }
+
+  int _codigosDelEnlace(String idEnlace) =>
+      _invitaciones.values.where((i) => i.idEnlace == idEnlace).length;
+
+  _FilaInvitacion _emitirInvitacion(String idInvitador) {
     final fila = _FilaInvitacion(
       id: _nuevoId('inv'),
-      idInvitador: idParticipante,
+      idInvitador: idInvitador,
       codigo: _codigoInvitacionUnico(),
       creadoEn: DateTime.now(),
       expiraEn: DateTime.now()
@@ -238,7 +274,7 @@ class RepositorioEnMemoria
     );
     _invitaciones[fila.id] = fila;
     _porCodigoInvitacion[fila.codigo] = fila.id;
-    return _invitacionAModelo(fila);
+    return fila;
   }
 
   @override
@@ -315,7 +351,6 @@ class RepositorioEnMemoria
     required String contrasena,
     required String telefono,
     required PaisTelefono pais,
-    String? codigoInvitador,
   }) async {
     await _latencia();
 
@@ -335,37 +370,15 @@ class RepositorioEnMemoria
       );
     }
 
-    // Regla 1: el telefono debe ser un movil valido del pais elegido.
-    final e164 = UtilesTelefono.aE164(telefono, pais);
-    if (e164 == null) {
-      throw ErrorReferidos(
-        MotivoError.telefonoInvalido,
-        pais.mensajeFormatoInvalido,
-      );
-    }
+    // Reglas 1 y 2: movil valido del pais elegido y sin pinta de falso.
+    final e164 = _telefonoValidado(telefono, pais);
 
-    // Regla 2: descartar numeros obviamente falsos antes de gastar un SMS.
-    if (UtilesTelefono.pareceSospechoso(e164, pais)) {
+    // Regla 3: un telefono = una cuenta.
+    if (_porTelefono.containsKey(e164)) {
       throw const ErrorReferidos(
-        MotivoError.numeroSospechoso,
-        'Ese número no parece real. Usa tu número personal para participar.',
-      );
-    }
-
-    // Regla 3: un telefono = una participacion. Es la restriccion que impide
-    // que la misma persona vuelva a canjear un codigo de invitacion.
-    final idExistente = _porTelefono[e164];
-    if (idExistente != null) {
-      final existente = _participantes[idExistente]!;
-      throw ErrorReferidos(
-        existente.codigoInvitador != null
-            ? MotivoError.yaTieneInvitador
-            : MotivoError.telefonoYaRegistrado,
-        existente.codigoInvitador != null
-            ? 'Este número ya usó un código de invitación. Cada persona puede '
-                'ser invitada una sola vez.'
-            : 'Este número ya tiene una cuenta. Ingresa con tu celular y '
-                'contraseña.',
+        MotivoError.telefonoYaRegistrado,
+        'Este número ya tiene una cuenta. Ingresa con tu celular y '
+        'contraseña.',
       );
     }
 
@@ -380,50 +393,17 @@ class RepositorioEnMemoria
       );
     }
 
-    // Regla 5: validaciones del codigo de invitacion de un solo uso.
-    String? invitacionNormalizada;
-    if (codigoInvitador != null && codigoInvitador.trim().isNotEmpty) {
-      invitacionNormalizada = CodigoReferido.normalizar(codigoInvitador);
-
-      if (!CodigoReferido.esValido(invitacionNormalizada)) {
-        throw const ErrorReferidos(
-          MotivoError.codigoMalFormado,
-          'Ese código de invitación no es válido. Revisa que esté completo.',
-        );
-      }
-
-      final invitacionFila = _invitacionVigente(invitacionNormalizada);
-      final invitador = _participantes[invitacionFila.idInvitador]!;
-
-      // Autorreferido y cadenas circulares. Con el modelo actual (un telefono
-      // se registra una sola vez y el invitador se graba al crear la fila)
-      // estos casos ya quedan cubiertos por la regla 3. Se dejan explicitos
-      // como defensa en profundidad, igual que en SQL.
-      if (invitador.telefonoE164 == e164) {
-        throw const ErrorReferidos(
-          MotivoError.autoReferido,
-          'No puedes invitarte a ti mismo.',
-        );
-      }
-      if (_esCircular(invitador, e164)) {
-        throw const ErrorReferidos(
-          MotivoError.referidoCircular,
-          'Esa persona ya fue invitada por ti. No se permiten invitaciones '
-          'cruzadas.',
-        );
-      }
-
-      // Regla 6: anclaje del dispositivo.
-      _revisarAnclaje(invitador, huella);
-    }
-
-    return _crearDesafio(
+    final desafio = _Desafio(
+      id: _nuevoId('otp'),
       telefonoE164: e164,
+      codigo: _codigoVerificacion(),
+      expiraEn: DateTime.now().add(_duracionDesafio),
       nombre: nombreLimpio,
       contrasena: contrasena,
       huella: huella,
-      codigoInvitador: invitacionNormalizada,
     );
+    _desafios[desafio.id] = desafio;
+    return _desafioAModelo(desafio);
   }
 
   @override
@@ -475,35 +455,7 @@ class RepositorioEnMemoria
   @override
   Future<DesafioVerificacion> reenviarCodigo(String idDesafio) async {
     await _latencia(200);
-    final desafio = _desafios[idDesafio];
-    if (desafio == null) {
-      throw const ErrorReferidos(
-        MotivoError.verificacionExpirada,
-        'La verificación expiró. Vuelve a empezar.',
-      );
-    }
-
-    final espera =
-        DateTime.now().difference(desafio.ultimoEnvio).inSeconds;
-    if (espera < _segundosEntreEnvios) {
-      throw ErrorReferidos(
-        MotivoError.demasiadosIntentos,
-        'Espera ${_segundosEntreEnvios - espera} segundos para pedir otro '
-        'código.',
-      );
-    }
-
-    desafio.codigo = _codigoVerificacion();
-    desafio.expiraEn = DateTime.now().add(_duracionDesafio);
-    desafio.ultimoEnvio = DateTime.now();
-    desafio.intentos = 0;
-
-    return DesafioVerificacion(
-      id: desafio.id,
-      telefonoE164: desafio.telefonoE164,
-      expiraEn: desafio.expiraEn,
-      codigoDemo: desafio.codigo,
-    );
+    return _reenviar(_desafios, idDesafio);
   }
 
   @override
@@ -512,10 +464,259 @@ class RepositorioEnMemoria
     required String codigo,
   }) async {
     await _latencia();
+    final desafio = _revisarSms(_desafios, idDesafio, codigo);
 
-    final desafio = _desafios[idDesafio];
+    // Entre el paso 1 y el paso 2 pudo registrarse el mismo numero.
+    if (_porTelefono.containsKey(desafio.telefonoE164)) {
+      throw const ErrorReferidos(
+        MotivoError.telefonoYaRegistrado,
+        'Este número ya tiene una cuenta. Ingresa con tu celular y '
+        'contraseña.',
+      );
+    }
+
+    // Registro nuevo: aqui recien nace el participante, ya con telefono
+    // verificado.
+    final fila = _FilaParticipante(
+      id: _nuevoId('par'),
+      nombre: desafio.nombre,
+      telefonoE164: desafio.telefonoE164,
+      contrasena: desafio.contrasena,
+      creadoEn: DateTime.now(),
+      telefonoVerificado: true,
+      huella: desafio.huella,
+    );
+
+    _participantes[fila.id] = fila;
+    _porTelefono[fila.telefonoE164] = fila.id;
+    _registrosPorDispositivo
+        .putIfAbsent(desafio.huella, () => [])
+        .add(DateTime.now());
+
+    await _guardarSesion(fila.id);
+    return _aModelo(fila);
+  }
+
+  // ---------------------------------------------------------------------
+  // Invitados: link, codigo y validacion sin cuenta ni SMS
+  // ---------------------------------------------------------------------
+
+  @override
+  Future<CodigoAsignado> obtenerCodigoDeEnlace(String tokenEnlace) async {
+    await _latencia(220);
+    final huella = huellaDispositivo;
+    _frenarAdivinanzas(huella);
+
+    final token =
+        tokenEnlace.toUpperCase().replaceAll(RegExp(r'[^A-Z0-9]'), '');
+    final enlace = _enlaces[token];
+    if (enlace == null) {
+      _codigosInvalidosRecientes(huella).add(DateTime.now());
+      throw const ErrorReferidos(
+        MotivoError.codigoInexistente,
+        'Este link de invitación no existe. Revisa que lo hayas abierto '
+        'completo.',
+      );
+    }
+    final invitador = _participantes[enlace.idInvitador]!;
+    if (_esDispositivoDe(invitador, huella)) {
+      throw const ErrorReferidos(
+        MotivoError.dispositivoDelInvitador,
+        'Este es tu propio link de invitación: compártelo por WhatsApp para '
+        'que cada contacto reciba su código.',
+      );
+    }
+
+    // El mismo dispositivo recibe siempre el mismo codigo de este link.
+    _FilaInvitacion? fila;
+    for (final invitacion in _invitaciones.values) {
+      if (invitacion.idEnlace == enlace.id &&
+          invitacion.huellaAsignada == huella) {
+        fila = invitacion;
+        break;
+      }
+    }
+
+    if (fila == null) {
+      if (DateTime.now().isAfter(enlace.expiraEn)) {
+        throw const ErrorReferidos(
+          MotivoError.codigoExpirado,
+          'Este link de invitación venció. Pide uno nuevo a quien te invitó.',
+        );
+      }
+      if (_codigosDelEnlace(enlace.id) >= _maxCodigosPorEnlace) {
+        throw const ErrorReferidos(
+          MotivoError.demasiadosIntentos,
+          'Este link ya entregó todos sus códigos. Pide uno nuevo a quien te '
+          'invitó.',
+        );
+      }
+      fila = _emitirInvitacion(enlace.idInvitador)
+        ..idEnlace = enlace.id
+        ..huellaAsignada = huella;
+    }
+
+    return CodigoAsignado(
+      codigo: fila.codigo,
+      expiraEn: fila.expiraEn,
+      usado: fila.usadaEn != null,
+      nombreInvitador: _primerNombre(invitador.nombre),
+    );
+  }
+
+  @override
+  Future<ResultadoCanje> validarCodigo({
+    required String codigoInvitacion,
+    required String telefono,
+    required PaisTelefono pais,
+  }) async {
+    await _latencia();
+    final huella = huellaDispositivo;
+    _frenarAdivinanzas(huella);
+
+    final codigo = CodigoReferido.normalizar(codigoInvitacion);
+    if (!CodigoReferido.esValido(codigo)) {
+      throw const ErrorReferidos(
+        MotivoError.codigoMalFormado,
+        'Ese código de invitación no es válido. Revisa que esté completo.',
+      );
+    }
+    final e164 = _telefonoValidado(telefono, pais);
+
+    final _FilaInvitacion invitacion;
+    try {
+      invitacion = _revisarCanje(codigo, e164, huella);
+    } on ErrorReferidos catch (error) {
+      if (const {
+        MotivoError.codigoInexistente,
+        MotivoError.codigoYaUsado,
+        MotivoError.codigoExpirado,
+      }.contains(error.motivo)) {
+        _codigosInvalidosRecientes(huella).add(DateTime.now());
+      }
+      rethrow;
+    }
+
+    final ahora = DateTime.now();
+    invitacion
+      ..usadaEn = ahora
+      ..huellaInvitado = huella
+      ..telefonoInvitado = e164;
+    _referidos.add(
+      _FilaReferido(
+        id: _nuevoId('ref'),
+        idInvitador: invitacion.idInvitador,
+        nombreInvitado: 'Invitado',
+        telefonoInvitado: e164,
+        estado: EstadoReferido.valido,
+        creadoEn: ahora,
+      ),
+    );
+
+    return ResultadoCanje(
+      codigo: invitacion.codigo,
+      telefonoE164: e164,
+      validadoEn: ahora,
+      nombreInvitador:
+          _primerNombre(_participantes[invitacion.idInvitador]?.nombre ?? ''),
+    );
+  }
+
+  void _frenarAdivinanzas(String huella) {
+    if (_codigosInvalidosRecientes(huella).length >= _maxCodigosInvalidos) {
+      throw const ErrorReferidos(
+        MotivoError.demasiadosIntentos,
+        'Probaste demasiados códigos que no sirven. Intenta de nuevo en una '
+        'hora.',
+      );
+    }
+  }
+
+  static String _primerNombre(String nombre) =>
+      nombre.trim().split(RegExp(r'\s+')).first;
+
+  /// Todas las reglas del canje, igual que `fn_revisar_canje` en la base.
+  _FilaInvitacion _revisarCanje(String codigo, String e164, String huella) {
+    final invitacion = _invitacionVigente(codigo);
+    final invitador = _participantes[invitacion.idInvitador]!;
+
+    // Un codigo entregado por un link solo lo valida el dispositivo que
+    // abrio el link.
+    if (invitacion.huellaAsignada != null &&
+        invitacion.huellaAsignada != huella) {
+      throw const ErrorReferidos(
+        MotivoError.dispositivoNoIdentificado,
+        'Este código se entregó a otro dispositivo. Abre el link de '
+        'invitación desde tu propio celular.',
+      );
+    }
+
+    if (invitador.telefonoE164 == e164) {
+      throw const ErrorReferidos(
+        MotivoError.autoReferido,
+        'No puedes invitarte a ti mismo.',
+      );
+    }
+
+    // Anclaje del dispositivo.
+    _revisarAnclaje(invitador, huella);
+
+    // Anclaje del telefono: un numero acepta una sola invitacion.
+    final telefonoYaInvitado =
+        _invitaciones.values.any((i) => i.telefonoInvitado == e164) ||
+            _referidos.any((r) => r.telefonoInvitado == e164);
+    if (telefonoYaInvitado) {
+      throw const ErrorReferidos(
+        MotivoError.yaTieneInvitador,
+        'Este número ya validó una invitación. Cada persona puede ser '
+        'invitada una sola vez.',
+      );
+    }
+
+    if (_esCircular(invitador, e164)) {
+      throw const ErrorReferidos(
+        MotivoError.referidoCircular,
+        'No puedes validar el código de alguien a quien tú invitaste.',
+      );
+    }
+    return invitacion;
+  }
+
+  DesafioVerificacion _reenviar(Map<String, _Desafio> esperas, String id) {
+    final desafio = esperas[id];
+    if (desafio == null) {
+      throw const ErrorReferidos(
+        MotivoError.verificacionExpirada,
+        'La verificación expiró. Vuelve a empezar.',
+      );
+    }
+
+    final espera = DateTime.now().difference(desafio.ultimoEnvio).inSeconds;
+    if (espera < _segundosEntreEnvios) {
+      throw ErrorReferidos(
+        MotivoError.demasiadosIntentos,
+        'Espera ${_segundosEntreEnvios - espera} segundos para pedir otro '
+        'código.',
+      );
+    }
+
+    desafio
+      ..codigo = _codigoVerificacion()
+      ..expiraEn = DateTime.now().add(_duracionDesafio)
+      ..ultimoEnvio = DateTime.now()
+      ..intentos = 0;
+    return _desafioAModelo(desafio);
+  }
+
+  /// Revisa el codigo del SMS y, si coincide, saca la espera de la lista.
+  _Desafio _revisarSms(
+    Map<String, _Desafio> esperas,
+    String id,
+    String codigo,
+  ) {
+    final desafio = esperas[id];
     if (desafio == null || DateTime.now().isAfter(desafio.expiraEn)) {
-      _desafios.remove(idDesafio);
+      esperas.remove(id);
       throw const ErrorReferidos(
         MotivoError.verificacionExpirada,
         'El código expiró. Pide uno nuevo.',
@@ -523,7 +724,7 @@ class RepositorioEnMemoria
     }
 
     if (desafio.intentos >= _maxIntentosVerificacion) {
-      _desafios.remove(idDesafio);
+      esperas.remove(id);
       throw const ErrorReferidos(
         MotivoError.demasiadosIntentos,
         'Demasiados intentos fallidos. Vuelve a solicitar el código.',
@@ -538,67 +739,32 @@ class RepositorioEnMemoria
       );
     }
 
-    _desafios.remove(idDesafio);
+    esperas.remove(id);
+    return desafio;
+  }
 
-    // Entre el paso 1 y el paso 2 pudo registrarse el mismo numero.
-    if (_porTelefono.containsKey(desafio.telefonoE164)) {
+  String _telefonoValidado(String telefono, PaisTelefono pais) {
+    final e164 = UtilesTelefono.aE164(telefono, pais);
+    if (e164 == null) {
+      throw ErrorReferidos(
+        MotivoError.telefonoInvalido,
+        pais.mensajeFormatoInvalido,
+      );
+    }
+    // Descartar numeros obviamente falsos antes de gastar un SMS.
+    if (UtilesTelefono.pareceSospechoso(e164, pais)) {
       throw const ErrorReferidos(
-        MotivoError.telefonoYaRegistrado,
-        'Este número ya tiene una cuenta. Ingresa con tu celular y '
-        'contraseña.',
+        MotivoError.numeroSospechoso,
+        'Ese número no parece real. Usa tu número personal para participar.',
       );
     }
+    return e164;
+  }
 
-    // Se vuelve a comprobar la invitacion y el anclaje: entre el paso 1 y
-    // el paso 2 pudo canjearla otra persona, vencer, o anclarse este mismo
-    // dispositivo a otro codigo.
-    _FilaInvitacion? invitacionFila;
-    if (desafio.codigoInvitador != null) {
-      invitacionFila = _invitacionVigente(desafio.codigoInvitador!);
-      _revisarAnclaje(
-        _participantes[invitacionFila.idInvitador]!,
-        desafio.huella,
-      );
-    }
-
-    // Registro nuevo: aqui recien nace el participante, ya con telefono
-    // verificado, y aqui se graba de forma definitiva quien lo invito.
-    final fila = _FilaParticipante(
-      id: _nuevoId('par'),
-      nombre: desafio.nombre,
-      telefonoE164: desafio.telefonoE164,
-      contrasena: desafio.contrasena,
-      creadoEn: DateTime.now(),
-      telefonoVerificado: true,
-      codigoInvitador: desafio.codigoInvitador,
-      huella: desafio.huella,
-    );
-
-    _participantes[fila.id] = fila;
-    _porTelefono[fila.telefonoE164] = fila.id;
-    _registrosPorDispositivo
-        .putIfAbsent(desafio.huella, () => [])
-        .add(DateTime.now());
-
-    if (invitacionFila != null) {
-      invitacionFila
-        ..usadaEn = DateTime.now()
-        ..nombreInvitado = fila.nombre
-        ..huellaInvitado = desafio.huella;
-      _referidos.add(
-        _FilaReferido(
-          id: _nuevoId('ref'),
-          idInvitador: invitacionFila.idInvitador,
-          nombreInvitado: fila.nombre,
-          telefonoInvitado: fila.telefonoE164,
-          estado: EstadoReferido.valido,
-          creadoEn: DateTime.now(),
-        ),
-      );
-    }
-
-    await _guardarSesion(fila.id);
-    return _aModelo(fila);
+  List<DateTime> _codigosInvalidosRecientes(String huella) {
+    final limite = DateTime.now().subtract(const Duration(hours: 1));
+    return _codigosInvalidos.putIfAbsent(huella, () => [])
+      ..removeWhere((fecha) => fecha.isBefore(limite));
   }
 
   // ---------------------------------------------------------------------
@@ -763,18 +929,21 @@ class RepositorioEnMemoria
       throw const ErrorReferidos(
         MotivoError.dispositivoYaAnclado,
         'Este dispositivo ya se usó para aceptar una invitación. Cada '
-        'invitado debe registrarse desde su propio celular.',
+        'invitado debe validar su código desde su propio celular.',
       );
     }
-    if (invitador.huella == huella ||
-        invitador.huellasIngreso.contains(huella)) {
+    if (_esDispositivoDe(invitador, huella)) {
       throw const ErrorReferidos(
         MotivoError.dispositivoDelInvitador,
         'Este código no se puede usar desde el dispositivo de quien te '
-        'invitó. Regístrate desde tu propio celular.',
+        'invitó. Valídalo desde tu propio celular.',
       );
     }
   }
+
+  bool _esDispositivoDe(_FilaParticipante participante, String huella) =>
+      participante.huella == huella ||
+      participante.huellasIngreso.contains(huella);
 
   List<DateTime> _registrosRecientes(String huella) {
     final limite = DateTime.now().subtract(const Duration(hours: 24));
@@ -821,34 +990,15 @@ class RepositorioEnMemoria
     );
   }
 
-  DesafioVerificacion _crearDesafio({
-    required String telefonoE164,
-    required String nombre,
-    required String contrasena,
-    required String huella,
-    String? codigoInvitador,
-  }) {
-    final desafio = _Desafio(
-      id: _nuevoId('otp'),
-      telefonoE164: telefonoE164,
-      codigo: _codigoVerificacion(),
-      expiraEn: DateTime.now().add(_duracionDesafio),
-      nombre: nombre,
-      contrasena: contrasena,
-      huella: huella,
-      codigoInvitador: codigoInvitador,
-    );
-    _desafios[desafio.id] = desafio;
-
-    return DesafioVerificacion(
-      id: desafio.id,
-      telefonoE164: desafio.telefonoE164,
-      expiraEn: desafio.expiraEn,
-      // Con Supabase este campo viaja vacio: el codigo solo existe en el SMS
-      // que envia Twilio.
-      codigoDemo: desafio.codigo,
-    );
-  }
+  DesafioVerificacion _desafioAModelo(_Desafio desafio) =>
+      DesafioVerificacion(
+        id: desafio.id,
+        telefonoE164: desafio.telefonoE164,
+        expiraEn: desafio.expiraEn,
+        // Con Supabase este campo viaja vacio: el codigo solo existe en el
+        // SMS que envia Twilio.
+        codigoDemo: desafio.codigo,
+      );
 
   String _codigoVerificacion() =>
       (100000 + _aleatorio.nextInt(900000)).toString();
@@ -873,25 +1023,29 @@ class RepositorioEnMemoria
         creadoEn: fila.creadoEn,
         expiraEn: fila.expiraEn,
         usadaEn: fila.usadaEn,
-        nombreInvitado: fila.nombreInvitado,
+        telefonoInvitado: fila.telefonoInvitado == null
+            ? null
+            : UtilesTelefono.enmascarar(fila.telefonoInvitado!),
       );
 
-  /// Un ciclo existe cuando el invitador (o alguien de su cadena hacia
-  /// arriba) fue invitado justamente por el numero que ahora se registra.
-  ///
-  /// Con el flujo actual el grafo de invitaciones es siempre un bosque (cada
-  /// participante nace con un unico padre que ya existia), asi que este caso
-  /// no deberia poder darse. Se mantiene como verificacion redundante.
+  /// Un ciclo existe cuando quien invita (o alguien de su cadena hacia
+  /// arriba) fue invitado justamente por el numero que ahora valida el
+  /// codigo. Como el invitado no tiene cuenta, la cadena se sigue por los
+  /// telefonos anclados a cada invitacion.
   bool _esCircular(_FilaParticipante invitador, String telefonoNuevo) {
     var actual = invitador;
-    var saltos = 0;
-    while (actual.codigoInvitador != null && saltos < 10) {
-      final idPadre = _invitacionPorCodigo(actual.codigoInvitador!)?.idInvitador;
-      if (idPadre == null) return false;
-      final padre = _participantes[idPadre]!;
+    for (var saltos = 0; saltos < 50; saltos++) {
+      _FilaInvitacion? recibida;
+      for (final invitacion in _invitaciones.values) {
+        if (invitacion.telefonoInvitado == actual.telefonoE164) {
+          recibida = invitacion;
+          break;
+        }
+      }
+      if (recibida == null) return false;
+      final padre = _participantes[recibida.idInvitador]!;
       if (padre.telefonoE164 == telefonoNuevo) return true;
       actual = padre;
-      saltos++;
     }
     return false;
   }
@@ -911,20 +1065,12 @@ class RepositorioEnMemoria
         id: fila.id,
         nombre: fila.nombre,
         telefonoE164: fila.telefonoE164,
-        codigoInvitador: fila.codigoInvitador,
         creadoEn: fila.creadoEn,
         telefonoVerificado: fila.telefonoVerificado,
         referidosValidos: _contarValidos(fila.id),
         referidosPendientes: _contarPendientes(fila.id),
         ganadorPrueba: fila.ganadorPrueba,
       );
-
-  String _nombreCorto(String nombre) {
-    final partes = nombre.trim().split(RegExp(r'\s+'));
-    if (partes.length == 1) return partes.first;
-    final inicial = partes[1].substring(0, 1).toUpperCase();
-    return '${partes.first} $inicial.';
-  }
 
   String _telefonoAleatorio() {
     final numero = 90000000 + _aleatorio.nextInt(9999999);
